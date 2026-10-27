@@ -64,6 +64,31 @@ Piksel koruması uygulama tarafında (`compositeProtectedEdit`); sağlayıcını
 4. Anahtarlar: `desktop/server/main.mjs` `KEY_NAMES`; `desktop/macos/.../KeyVault.swift` `ProviderKey`; `App.swift` metni.
 5. Testler: `tests/provider-routing.test.mjs`, sahte Wiro yanıtıyla `requestImage` testi, imza testi.
 
+**Aşama 1 — yapılanlar (`efe/wiro-images`, 2026-10-27)**
+- Kuyruk hatası (Y1/Y2): `desktop/server/jobLoop.mjs` + store `record_image_job_failure`. Beklenmeyen hata loglanır (yalnız mesaj), deneme sayısı SQLite'taki iş kaydında tutulur, 5 sn'den başlayan üstel bekleme; 5 denemede iş `failed` olur ve galeride görünür mesaj çıkar (dispatch öncesi: "No provider request was sent"; sonrası: "It was not resubmitted" + görev kimliği). Dispatch edilmiş iş yalnız `observe` edilir, sağlayıcıya yeniden gönderilmez.
+- Sağlayıcı: `src/lib/providers.ts` `'wiro'`, üç görsel modelinde Auto'da ilk sırada; diğerleri yedek. Uygunluk için `WIRO_API_KEY` ve `WIRO_API_SECRET` ikisi de gerekir (`PROVIDER_SECRET_KEYS`). Video/metin rotaları değişmedi.
+- İstek: `api/_lib/wiro.ts` (imza, Run, Task/Detail, indirme) + `requestImage` Wiro dalı. Yerel referanslar multipart dosya olarak gider (loopback URL gönderilmez). Sunburst ön ayar boyutları `openai/gpt-image-2-5-sunburst` (`resolution` 1k/2k/4k, `ratio`); özel boyut ve korumalı düzenleme `-custom` (`width/height` 480–3840, dışı dispatch öncesi 400). Wiro'da `auto` kalite yok, `auto` → `low` (şema varsayılanı). Nano Banana 2.1 → `google/nano-banana-2-1` (`outputFormat: png`), Pro → `google/nano-banana-pro`. Korumalı düzenleme uygulama tarafında `compositeProtectedEdit` ile kalır.
+- İndirme: yalnız `https`, host `wiro.ai`/`*.wiro.ai`, port/kimlik bilgisi yok, `redirect:'error'`, ≤50 MB (başlık + gövde), yalnız png/jpeg/webp.
+- Kurtarma: Run'dan dönen `taskid` yoklamadan önce işe yazılır (`record_image_job_task`, satırda `providerTaskId`). Her deneme 240 sn yoklar; bitmezse iş `dispatched` kalır, kuyruk aynı görevi `Task/Detail` ile sürdürür (Run yok). 30 dk sonra görev kimliğiyle `failed`.
+- Maliyet: `totalcost` → `generationCost {usd, source:'provider_actual'}` ("Actual Cost"). Wiro yalnız başarılı görevi ücretlendirir; başarısız görevde Wiro'nun hata metni gösterilir.
+- Anahtarlar: `KEY_NAMES`, `ProviderKey.wiroKey/.wiroSecret` (listede ilk), Provider keys penceresi metni ve yüksekliği. Secret yalnız HMAC'e girer; ağa, loga, WebView'a gitmez.
+- Görünürlük: AI settings → Provider routing'de "Wiro · configured / key and secret missing" satırı ve her görsel modelinde "Auto · Wiro"; seçicinin yanında "Provider Auto · Wiro"; üret düğmesinde Wiro liste fiyatı (ör. "~$0.006 · Wiro") ya da "Wiro · billed at finish"; görsel ayrıntılarında Provider Wiro, Wiro slug'ı, "Wiro task <id>", "Actual Cost".
+
+**Model kataloğu kararı (Efe: "seçili liste + katalogdan ekle")**
+- Seçici kullanıcının seçili Wiro modellerini gösterir; varsayılan üç model mevcut uygulama kimlikleriyle eşleşir (eski sıra korunur), böylece yedek sağlayıcılar çalışmaya devam eder. Wiro anahtarı yokken seçici ve tüm akışlar eskisi gibidir.
+- Katalogdan eklenen modeller `wiro:<owner>/<model>` kimliği alır ve yalnız Wiro'ya gider.
+- AI settings → "Wiro image models": arama (Tool/List, kategoriler `text-to-image`, `image-to-image`, `image-editing`; VEYA ile çalışır), ekle/çıkar, Refresh (Tool/Detail; kaybolan model "missing", fiyat/girdi değişimi "changed"). Tüm Wiro çağrıları masaüstü sunucusunda imzalanır (`desktop/server/wiroCatalog.mjs`, route `wiro-models`); WebView yalnız arama metni ya da slug gönderir. Seçim yerel depoda (`settings.wiroModels`) saklanır; kontroller sunucuda Tool/Detail'den üretilir.
+- Şema → kontrol eşlemesi (`src/lib/wiro/catalog.ts` `mapWiroSchema`): `prompt`, görsel dosya girdisi (maske hariç, `maxinputlenght`), `ratio`/`aspectRatio`, `resolution`, `quality`, `samples` (hep 1), sayısal `width/height` (uygulamanın oran + 1K/2K seçimiyle; seçilmezse modelin varsayılanı). Diğer opsiyonel alanlar gizli ve Wiro varsayılanında. Uygulamanın dolduramayacağı zorunlu bir girdi varsa model "desteklenmiyor" olur.
+- Fiyat: Tool/Detail `dynamicprice`. Yalnız `cpr`/`cpo` satırları sabit fiyat sayılır; `cp-readoutput`, `cp-pixel` vb. için "From $X · varies with size" ya da "Price computed when the task finishes" gösterilir, asla $0 gösterilmez.
+
+**Efe için uygulama içi uçtan uca test (ücretli, ≤ $0.01)**
+Bu oturumda Erişilebilirlik, Ekran Kaydı ve olay gönderme izinleri kapalı olduğu için uygulama arayüzü sürülemedi; ücretli görev oluşturulmadı. Adımlar:
+1. `open '.build/staging/Banana Studio.app'` (worktree'de; aynı anda tek örnek açılabilir).
+2. Provider keys → "Wiro API key" ve "Wiro API secret" alanlarına `.env`'deki değerleri yapıştır → Save.
+3. AI settings → Provider routing'de "Wiro · configured" ve GPT Image 2.5 için "Auto · Wiro" görünmeli. "Wiro image models" fiyatları yükler.
+4. Seçicide GPT Image 2.5, oran 1:1, çözünürlük 1K, kalite **Low** (ya da Auto; Wiro'da low'a gider). Düğmede "~$0.006 · Wiro" görünmeli.
+5. İstem yaz → Generate image (tek görsel). ~20 sn sonra galeride; ayrıntılarda Provider Wiro, "Wiro task <id>", Actual Cost $0.0060.
+
 **Aşama 2 — metin (Claude CLI) ve video**
 - Claude CLI metin sağlayıcısı (yukarıda).
 - Video hataları önce: `App.tsx:941` `task_id` kontrolsüz, `App.tsx:948` oturum kontrolü sırası, `storageService.ts:1656` `updateVideoStatus`.
@@ -87,7 +112,8 @@ Packager temiz bir git commit ister.
 
 ## Riskler
 
-- `outputs` biçimi doğrulanmadı.
+- Doğrulanmadı: birden çok referansın aynı `inputImage` alanında multipart dosya olarak kabulü, `-custom` slug'ı / korumalı düzenleme ve Nano modelleri Wiro üzerinden (ücretli çalıştırma yapılmadı), fiyat değişikliğinin gerçek bir değişimle tespiti.
+- Kurtarmada (`observe` + `providerTask`) referanslar yeniden okunur; referans silindiyse korumalı düzenleme kurtarılamaz ve iş deneme sınırında `failed` olur (görev kimliği mesajda).
 - 250 sn sınırı aşılırsa ücretlenmiş Wiro görevi kaybolabilir (Aşama 3 kurtarma).
 - Nano Banana korumalı düzenlemede desteklenmeyen oranlarda tuval tutmayabilir.
 - Fiyatı "$0 model-reported" görünen modellerde tahmin yok; ücret iş bitince `totalcost`'tan.
