@@ -28,6 +28,7 @@ import { compressImage, estimateBase64Size, saveReferenceImage, getReferenceGall
 import { YouTubeChannelRef } from './YouTubeChannelRef';
 import { resolveTextModelPreferences } from '../lib/prompts/textModels';
 import { getTextModelLabel } from '../types';
+import { PROVIDER_LABELS, type AIProvider } from '../lib/providers';
 import { createPromptPreparation } from '../lib/prompts/promptPreparation';
 import type { TextTaskStage } from '../services/geminiClient';
 import type { BrainstormGenerationRequest } from '../lib/brainstorm/brainstormGeneration';
@@ -829,7 +830,9 @@ export const Controls: React.FC<ControlsProps> = ({
     setEnhanceStage('preparing');
     setIsEnhancing(true);
     try {
-      const textOptions = { ...await resolveTextModelPreferences(), onStage: setEnhanceStage };
+      let textProvider: AIProvider | undefined;
+      const textOptions = { ...await resolveTextModelPreferences(), onStage: setEnhanceStage,
+        onProvider: (provider: AIProvider) => { textProvider = provider; setEnhanceModelLabel(`${getTextModelLabel(textOptions.model)} · ${PROVIDER_LABELS[provider]}`); } };
       setEnhanceModelLabel(getTextModelLabel(textOptions.model));
       let enhanced: string;
       if (config.mode === 'video') {
@@ -870,7 +873,7 @@ export const Controls: React.FC<ControlsProps> = ({
           ...enhancementTarget,
           prompt: enhanced,
           originalPrompt,
-          promptPreparation: createPromptPreparation('enhance', textOptions),
+          promptPreparation: createPromptPreparation('enhance', { ...textOptions, provider: textProvider }),
         });
       }
     } catch (e) {
