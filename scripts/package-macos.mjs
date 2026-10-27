@@ -42,7 +42,7 @@ const publicKey=fs.readFileSync(path.join(root,'desktop/macos/Resources/SparkleP
 fs.writeFileSync(path.join(contents,'Info.plist'),`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleIdentifier</key><string>com.bananastudio.app</string>
+<key>CFBundleIdentifier</key><string>io.github.selcukozbilgi.bananastudio</string>
 <key>CFBundleName</key><string>Banana Studio</string><key>CFBundleDisplayName</key><string>Banana Studio</string>
 <key>CFBundleExecutable</key><string>BananaStudio</string><key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>${version}</string><key>CFBundleVersion</key><string>${build}</string>
