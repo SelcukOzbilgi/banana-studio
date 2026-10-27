@@ -10,12 +10,14 @@ import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/lib/images/imageEditPixels.ts',import.meta.url))],bundle:true,write:false,format:'esm',platform:'node'});
 const {compositeEditPixels} = await import('data:text/javascript;base64,'+Buffer.from(compiled.outputFiles[0].text).toString('base64'));
+const configuration = await build({entryPoints:[fileURLToPath(new URL('../api/_lib/providerConfiguration.ts',import.meta.url))],bundle:true,write:false,format:'esm',platform:'node'});
+const {providerAvailability} = await import('data:text/javascript;base64,'+Buffer.from(configuration.outputFiles[0].text).toString('base64'));
 import { LocalWorkspace } from '../desktop/server/store.mjs';
 import { createMediaUploader } from '../desktop/server/uploads.mjs';
 
 test('every key combination selects only a configured route for the same model',()=>{
   const providers=Object.keys(PROVIDER_KEYS);
-  for(let mask=0;mask<32;mask++){
+  for(let mask=0;mask<1<<providers.length;mask++){
     const available=Object.fromEntries(providers.map((provider,index)=>[provider,!!(mask&(1<<index))]));
     for(const [model,routes] of Object.entries(MODEL_ROUTES)){
       const expected=routes.find(provider=>available[provider]);
@@ -29,6 +31,20 @@ test('every key combination selects only a configured route for the same model',
   }
   assert.throws(()=>resolveProvider('__proto__','auto',{fal:true}),/Unsupported/);
   assert.throws(()=>resolveProvider('anthropic/claude-opus-5.5','fal',{fal:true,openrouter:true}));
+});
+test('Claude (abonelik) is first for Opus 5.5 only, desktop-only, and falls back to OpenRouter in Auto',()=>{
+  assert.deepEqual(MODEL_ROUTES['anthropic/claude-opus-5.5'],['claude-cli','openrouter']);
+  for(const [model,routes] of Object.entries(MODEL_ROUTES))if(model!=='anthropic/claude-opus-5.5')assert.ok(!routes.includes('claude-cli'),model);
+  assert.equal(resolveProvider('anthropic/claude-opus-5.5','auto',{'claude-cli':true,openrouter:true}),'claude-cli');
+  assert.equal(resolveProvider('anthropic/claude-opus-5.5','auto',{openrouter:true}),'openrouter');
+  assert.throws(()=>resolveProvider('anthropic/claude-opus-5.5','claude-cli',{openrouter:true}),/Claude CLI bulunamadı/);
+  const saved={...process.env};
+  try{
+    process.env.BANANA_CLAUDE_CLI='/Users/example/.local/bin/claude';delete process.env.BANANA_RUNTIME;
+    assert.equal(providerAvailability()['claude-cli'],false);
+    process.env.BANANA_RUNTIME='local';assert.equal(providerAvailability()['claude-cli'],true);
+    delete process.env.BANANA_CLAUDE_CLI;assert.equal(providerAvailability()['claude-cli'],false);
+  }finally{for(const key of ['BANANA_CLAUDE_CLI','BANANA_RUNTIME'])if(saved[key]===undefined)delete process.env[key];else process.env[key]=saved[key];}
 });
 const request=(extra={})=>({videoModel:'seedance-2.5',mode:'image_to_video',prompt:'Move from @IMAGE_1 to @IMAGE_2.',duration:8,quality:'720p',aspectRatio:'adaptive',generateAudio:true,imageUrls:['https://example.invalid/first.png','https://example.invalid/last.png'],...extra});
 test('first and last frames remain distinct in both video providers; reference mode remains separate',()=>{

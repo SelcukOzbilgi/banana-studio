@@ -5,6 +5,7 @@ import { getOpenAIImageOptions, getOpenAIImageSize, SUNBURST_MODEL, validateOpen
 import { createTaskDeadline, waitForTask } from '../shared/asyncTask';
 import { validateImageGenerationReferences } from '../images/imagePrompting';
 import { createPromptPreparation } from '../prompts/promptPreparation';
+import type { AIProvider } from '../providers';
 
 export interface BrainstormGenerationRequest {
   settings: GenerationConfig;
@@ -60,12 +61,13 @@ export const createBrainstormBatch = (request: BrainstormGenerationRequest, fold
     if (cancelled) task.abort(new Error('Brainstorm cancelled. No image generation was started.'));
     try {
       task.signal.throwIfAborted();
-      const ideas = await waitForTask(deps.prepare(settings, ideaCount, { model: textModel, reasoningEffort, thinkingLevel, signal: task.signal }), task.signal);
+      let provider: AIProvider | undefined;
+      const ideas = await waitForTask(deps.prepare(settings, ideaCount, { model: textModel, reasoningEffort, thinkingLevel, signal: task.signal, onProvider: value => { provider = value; } }), task.signal);
       task.check();
       task.signal.throwIfAborted();
       // A partial/malformed text response must not silently bill a different batch.
       if (ideas.length !== ideaCount || ideas.some(idea => !idea.text?.trim())) throw new Error('The model did not return all requested ideas. No image generation was started.');
-      const promptPreparation = createPromptPreparation('brainstorm', { model: textModel, reasoningEffort, thinkingLevel });
+      const promptPreparation = createPromptPreparation('brainstorm', { model: textModel, reasoningEffort, thinkingLevel, provider });
       preparing = false;
       task.dispose();
       deps.onPrepared?.();

@@ -11,6 +11,7 @@ import { isValidEditRegion, type ImageEditRegion } from '../lib/images/imageEdit
 import { enhancePrompt } from '../services/geminiService';
 import { resolveTextModelPreferences } from '../lib/prompts/textModels';
 import { createPromptPreparation } from '../lib/prompts/promptPreparation';
+import type { AIProvider } from '../lib/providers';
 import { getPromptEnhancementTarget, IMAGE_MODEL_OPTIONS, isEnhancedPromptStale, type GeneratedMedia, type GenerationConfig, type ImageModelId, type OpenAIImageOptions, type ReferenceImage, type TextModelId } from '../types';
 import { getGalleryEditJobs, getEditJobProgress } from '../lib/gallery/galleryEditJobs';
 import { GalleryEditResults } from './GalleryEditResults';
@@ -166,14 +167,16 @@ export const GalleryImageEditor: React.FC<GalleryImageEditorProps> = ({ image, i
     const brief = config.originalPrompt ?? prompt;
     try {
       const preferences = await resolveTextModelPreferences();
+      let provider: AIProvider | undefined;
       const textOptions = {
         model: initialTextModel || preferences.model, thinkingLevel: preferences.thinkingLevel,
         reasoningEffort: preferences.reasoningEffort, signal: controller.signal,
+        onProvider: (value: AIProvider) => { provider = value; },
       };
       const result = await enhancePrompt(brief, config.referenceImages, config, textOptions);
       if (!result || controller.signal.aborted || !mountedRef.current) return;
       setPrompt(result);
-      setEnhancement({ originalPrompt: brief, ...getPromptEnhancementTarget(config), promptPreparation: createPromptPreparation('enhance', textOptions) });
+      setEnhancement({ originalPrompt: brief, ...getPromptEnhancementTarget(config), promptPreparation: createPromptPreparation('enhance', { ...textOptions, provider }) });
     } catch (failure) {
       if (!controller.signal.aborted && mountedRef.current) setError(failure instanceof Error ? failure.message : 'Could not enhance the edit prompt.');
     } finally {

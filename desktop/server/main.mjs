@@ -6,6 +6,8 @@ import { setWorkspace } from './context.mjs';
 import { startLocalServer } from './http.mjs';
 import { setQueueWake } from './queue.mjs';
 import { createMediaUploader } from './uploads.mjs';
+import { createClaudeCliLocator } from './claudeCli.mjs';
+import { createClaudeStatusHandler, createClaudeTextHandler } from './claudeText.mjs';
 import { runImageJob, ImageJobWait } from '../../api/_lib/imageJobRunner.ts';
 import openaiText from '../../api/openai-text-generate.ts';
 import openrouterText from '../../api/openrouter-text-generate.ts';
@@ -50,6 +52,12 @@ const wake=()=>{
 setQueueWake(wake);
 const routes={'openai-text-generate':openaiText,'openrouter-text-generate':openrouterText,'gemini-generate':geminiGenerate,'gemini-status':geminiStatus,'openai-image-generate':openaiImage,'openai-image-enqueue':openaiEnqueue,'openai-image-recover':openaiRecover,'fal-image-generate':falImage,'fal-status':falStatus,'fal-h3-video':falVideo,'fal-video-scale':falScale,'evolink-generate':evolinkGenerate,'evolink-status':evolinkStatus,'youtube':youtube,'youtube-status':youtubeStatus};
 const prepareMedia=createMediaUploader(workspace);
+// Claude (abonelik): availability follows the CLI on disk, never a stored key.
+const claudeLocator=createClaudeCliLocator({getConfigured:()=>workspace.setting('claudeCliPath')});
+const claude={refresh:async()=>{const state=await claudeLocator.refresh();if(state.available)process.env.BANANA_CLAUDE_CLI=state.path;else delete process.env.BANANA_CLAUDE_CLI;return state;}};
+routes['claude-cli-text-generate']=createClaudeTextHandler({locator:claude});
+routes['claude-cli-status']=createClaudeStatusHandler({locator:claude,saveConfigured:value=>workspace.setting('claudeCliPath',value)});
+routes['gemini-status']=async(req,res)=>{if(req.method==='GET')await claude.refresh();return geminiStatus(req,res);};
 routes['seedance-video']=async(req,res)=>{
  if(req.method==='POST'){
   try{

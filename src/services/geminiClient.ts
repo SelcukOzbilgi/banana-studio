@@ -2,6 +2,7 @@ import { supabase } from './authService';
 import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import type { OpenAIReasoningEffort } from '../lib/prompts/openaiText';
 import { selectProvider } from './providerRouting';
+import type { AIProvider } from '../lib/providers';
 
 export type TextTaskStage = 'preparing' | 'connecting' | 'generating' | 'finishing';
 export interface TextTaskOptions {
@@ -10,6 +11,8 @@ export interface TextTaskOptions {
   model?: string;
   reasoningEffort?: OpenAIReasoningEffort;
   thinkingLevel?: 'LOW' | 'MEDIUM' | 'HIGH';
+  /** Called once the route is chosen, before submission, so the UI can name the actual provider. */
+  onProvider?: (provider: AIProvider) => void;
 }
 
 // Re-export the constants we previously pulled in from @google/genai so
@@ -169,7 +172,9 @@ const routeTextContent = async (request: GenerateContentRequest, options?: TextT
     usageContext: request.usageContext || { action: 'enhance' as const, prompt: video ? '[youtube-video-brief]' : '[text-task]' },
     ...(video ? { outputFormat: 'youtube_analysis' as const } : {}),
   };
-  return generateContent(normalized, provider === 'openrouter' ? '/api/openrouter-text-generate' : provider === 'openai' ? '/api/openai-text-generate' : GEMINI_ENDPOINT, options);
+  options?.onProvider?.(provider);
+  const endpoint = provider === 'claude-cli' ? '/api/claude-cli-text-generate' : provider === 'openrouter' ? '/api/openrouter-text-generate' : provider === 'openai' ? '/api/openai-text-generate' : GEMINI_ENDPOINT;
+  return generateContent(normalized, endpoint, options);
 };
 export const getGeminiClient = () => ({
   models: {

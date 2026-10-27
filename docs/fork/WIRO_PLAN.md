@@ -42,10 +42,23 @@ Piksel koruması uygulama tarafında (`compositeProtectedEdit`); sağlayıcını
 
 ## Claude CLI sağlayıcısı (abonelikle metin, API ücreti yok)
 
-- Yalnız masaüstü. `desktop/server` kullanıcının yerelde kurulu ve giriş yapılmış `claude` CLI'ını headless modda çağırır (`claude -p`, JSON çıktı, araçlar kapalı; referans görseller gerekiyorsa yalnız geçici bir klasörde `Read`). Bayrakları uygulamadan önce `claude --help` ile doğrula. Bu makinede: `~/.local/bin/claude`, 2.1.311.
-- API anahtarı yok, OAuth token'ı CLI dışına çıkarılmaz/kopyalanmaz. Kişisel kullanım içindir; başkalarına "Claude ile giriş" özelliği olarak dağıtılmaz.
-- Gecikme ve abonelik kullanım limitleri var; hata ve zaman aşımı açıkça gösterilmeli. CLI bulunamazsa diğer metin sağlayıcılarına düşülür.
-- Bağlantı noktaları: `src/services/geminiClient.ts` (metin endpoint seçimi), `api/openrouter-text-generate.ts` (örnek handler), `desktop/server/main.mjs` routes, `src/lib/providers.ts` metin rotaları.
+**Durum: yapıldı** (`efe/claude-cli-text`, 2026-10-27). CLI 2.1.311 ile doğrulandı.
+
+**Politika:** yalnız kişisel kullanım; kendi Claude aboneliğin, yalnız resmi `claude` CLI üzerinden. Uygulama Claude OAuth token'ını ya da `~/.claude` kimlik dosyalarını hiç okumaz, kopyalamaz, iletmez; giriş tamamen CLI'da kalır. Başkalarına "Claude ile giriş" özelliği olarak dağıtılmaz.
+
+- Sağlayıcı `claude-cli`, etiket "Claude (abonelik)". Yalnız `anthropic/claude-opus-5.5` rotasında, ilk sırada: `['claude-cli', 'openrouter']`. Auto, CLI bulunursa onu seçer, bulunmazsa OpenRouter'a geçer (gönderimden önce; istek başarısız olursa başka sağlayıcıya tekrar gönderilmez).
+- Yalnız masaüstü: `providerAvailability()` `claude-cli`'ı yalnız `BANANA_RUNTIME=local` iken ve masaüstü sunucusu `BANANA_CLAUDE_CLI` değişkenine doğrulanmış yolu yazdığında açık sayar. Web/Vercel'de route yok, seçenek ayarlarda gizli.
+- Kod: `desktop/server/claudeCli.mjs` (bulma, argümanlar, ortam, çalıştırma, sonuç yorumu), `desktop/server/claudeText.mjs` (`/api/claude-cli-text-generate` ve `/api/claude-cli-status`), `desktop/server/main.mjs` (route'lar; `gemini-status` her GET'te CLI'ı yeniden arar). `api/` altına dosya eklenmedi.
+- Çağrı: `claude -p --input-format stream-json --output-format stream-json --verbose --model claude-opus-5-5 --effort <low|medium|high|xhigh|max> --tools "" --strict-mcp-config --safe-mode --disable-slash-commands --permission-prompts none --no-session-persistence --system-prompt <sabit talimat> [--json-schema <şema>]`. Prompt ve görseller stdin'den tek bir user mesajı olarak gider (argv'de değil). `--bare` kullanılmaz (OAuth'u kapatır), `--fallback-model` kullanılmaz (sessiz model değişimi olurdu).
+- Görseller: JPEG/PNG/WebP referansları stdin mesajında base64 `image` bloğu olarak gider; araç ya da geçici dosya gerekmez (`--tools ""`). YouTube görüntüsü (`fileData`) reddedilir; o iş Gemini'de kalır.
+- Yapılandırılmış çıktı: Brainstorm ve video analizi şemaları `--json-schema` ile verilir (`$defs/$ref` dahil doğrulandı), `structured_output` okunur ve mevcut `normalizeBrainstormOutput`/analiz kontrolünden geçer. Yanıt biçimi OpenRouter handler'ı ile aynı (`text`, `provider: 'claude-cli'`, `providerModel`, NDJSON `status/heartbeat/result/error`).
+- Çocuk süreç: boş geçici çalışma klasörü (iş bitince silinir), sıfırdan kurulan ortam: `PATH` (CLI klasörü + sistem), `HOME`, `USER`, `TMPDIR`, `LANG`, `DISABLE_AUTOUPDATER=1`. Sağlayıcı anahtarları ve `ANTHROPIC_API_KEY` çocuğa geçmez. `USER` şart: `env -i` denemelerinde `USER` yokken CLI her seferinde "Not logged in" dedi (Swift kabuğu Node'u yalnız `PATH/HOME/TMPDIR` ile başlatıyor; Swift değişmedi, ortam Node tarafında kuruluyor). init olayında `apiKeySource` bir API anahtarını gösterirse istek durdurulur.
+- Sınırlar: 240 sn zaman aşımı (SIGTERM, 3 sn sonra SIGKILL), 8 MB stdout sınırı, tarayıcı isteği kapanırsa süreç öldürülür, referanslar en çok ~4,1 MB (diğer handler'larla aynı).
+- Bulma: ayarlarda girilen yol (varsa tek aday; bozuksa açık hata, başka kuruluma sessizce geçilmez), yoksa `~/.local/bin/claude`, `/opt/homebrew/bin/claude`, `/usr/local/bin/claude`, `~/.claude/local/claude`, `~/.npm-global/bin`, `~/.volta/bin`, `~/.bun/bin`, `~/.nvm/versions/node/*/bin`. Her aday `claude --version` çıktısında "(Claude Code)" ile doğrulanır. Ayar: AI ayarları → Provider routing → "Claude (abonelik) · Claude Code CLI" (yalnız Mac).
+- Hatalar arayüzde açık: CLI bulunamadı (503), oturum açık değil (401, `/login` ipucu), abonelik limiti (429, `rate_limit_event.resetsAt` ile sıfırlanma saati), zaman aşımı (504), API anahtarı kullanımı (409), diğerleri CLI mesajıyla (502).
+- Gerçek sağlayıcı görünür: Enhance sırasında "Claude Opus 5.5 · Claude (abonelik)"; Enhance/Variation/Brainstorm sonuçlarında `promptPreparation.provider` kaydedilir ve ayrıntılarda "Provider" satırı gösterilir. Kullanım `usage_logs`'a `estimated_cost: 0` ile yazılır.
+- Gecikme (bu Mac, medium effort): kısa Enhance uçtan uca 3,6 sn (CLI 2,6 sn); görselli 2 fikirlik Brainstorm 5,8 sn. Uzun Enhance yönergeleri ve yüksek effort ile daha uzun sürer.
+- Bilinen sınırlar: abonelik 5 saatlik/haftalık kullanım limitleri; denemeler sırasında aynı ortamla bir kez geçici "Not logged in" görüldü (tekrar denenince geçti) — otomatik tekrar yok, hata açıkça gösterilir. Yalnız Opus 5.5 rotası; GPT-6.1 Sol ve Gemini 3.8 Flash değişmedi.
 
 ## Aşamalar
 
@@ -65,7 +78,7 @@ Piksel koruması uygulama tarafında (`compositeProtectedEdit`); sağlayıcını
 5. Testler: `tests/provider-routing.test.mjs`, sahte Wiro yanıtıyla `requestImage` testi, imza testi.
 
 **Aşama 2 — metin (Claude CLI) ve video**
-- Claude CLI metin sağlayıcısı (yukarıda).
+- Claude CLI metin sağlayıcısı (yukarıda) — yapıldı.
 - Video hataları önce: `App.tsx:941` `task_id` kontrolsüz, `App.tsx:948` oturum kontrolü sırası, `storageService.ts:1656` `updateVideoStatus`.
 - `desktop/server/uploads.mjs` → Wiro `/File/Upload`; `api/seedance-video.ts` Run + Task/Detail; `seedanceProviders.ts` kısıtlar; `providerTasks.ts` `Provider` tipi; `bs_wiro_` öneki (`App.tsx`, `runwayService.ts`, `Controls.tsx` maliyet).
 
