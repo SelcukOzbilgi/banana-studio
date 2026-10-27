@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { auditDistribution } from './audit-distribution.mjs';
 import { verifyReleaseArtifacts } from './release-signatures.mjs';
+import { FORK_REPOSITORY } from './fork-identity.mjs';
 
 const root=path.resolve(import.meta.dirname,'..');
 const run=(command,args,options={})=>execFileSync(command,args,{encoding:'utf8',maxBuffer:8*1024*1024,...options});
@@ -63,8 +64,8 @@ export function signMacRelease(app,{community=false,prepare=false}={}) {
  const signature=run(path.join(toolkit,'sign_update'),['--account','banana-studio','-p',archive]).trim();
  if(Buffer.from(signature,'base64').length!==64)throw new Error('The archive signature could not be verified.');
  const feed=path.join(directory,`appcast-${architecture}.xml`);
- const url=`https://github.com/orkunisitmak/banana-studio/releases/download/v${version}/${filename}`;
- fs.writeFileSync(feed,`<?xml version="1.0" encoding="utf-8"?>\n<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><title>Banana Studio</title><link>https://github.com/orkunisitmak/banana-studio</link><description>Signed Banana Studio updates</description><item><title>Banana Studio ${version}</title><link>https://github.com/orkunisitmak/banana-studio/commit/${sourceCommit}</link><sparkle:version>${build}</sparkle:version><sparkle:shortVersionString>${version}</sparkle:shortVersionString><sparkle:minimumSystemVersion>13.5.0</sparkle:minimumSystemVersion>${architecture==='arm64'?'<sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>':''}<pubDate>${new Date().toUTCString()}</pubDate><description>${community?'Community release. Apple notarization is not provided. ':'Application update. '}Your local data and Keychain entries stay on this Mac.</description><enclosure url="${url}" sparkle:edSignature="${signature}" length="${fs.statSync(archive).size}" type="application/octet-stream" /></item></channel></rss>\n`);
+ const url=`https://github.com/${FORK_REPOSITORY}/releases/download/v${version}/${filename}`;
+ fs.writeFileSync(feed,`<?xml version="1.0" encoding="utf-8"?>\n<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><title>Banana Studio</title><link>https://github.com/${FORK_REPOSITORY}</link><description>Signed Banana Studio updates</description><item><title>Banana Studio ${version}</title><link>https://github.com/${FORK_REPOSITORY}/commit/${sourceCommit}</link><sparkle:version>${build}</sparkle:version><sparkle:shortVersionString>${version}</sparkle:shortVersionString><sparkle:minimumSystemVersion>13.5.0</sparkle:minimumSystemVersion>${architecture==='arm64'?'<sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>':''}<pubDate>${new Date().toUTCString()}</pubDate><description>${community?'Community release. Apple notarization is not provided. ':'Application update. '}Your local data and Keychain entries stay on this Mac.</description><enclosure url="${url}" sparkle:edSignature="${signature}" length="${fs.statSync(archive).size}" type="application/octet-stream" /></item></channel></rss>\n`);
  run(path.join(toolkit,'sign_update'),['--account','banana-studio',feed]);
  const verified=verifyReleaseArtifacts({archivePath:archive,feedPath:feed,publicKey,version,build,architecture,sourceCommit});
  fs.writeFileSync(path.join(directory,`verification-${architecture}.json`),JSON.stringify({version,build,architecture,distribution,notarization:community?'NotRequested':'Accepted',signatureVerified:true,privacyAuditPassed:true,archive:filename,sourceCommit,archiveSha256:verified.archiveSha256,feedSha256:verified.feedSha256},null,2)+'\n');

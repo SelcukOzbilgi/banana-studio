@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, createPublicKey, verify } from 'node:crypto';
+import { FORK_REPOSITORY } from './fork-identity.mjs';
 
 const fail=()=>{throw new Error('Release signature or metadata verification failed.');};
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -40,7 +41,7 @@ const singleText=(xml,tag)=>{
  if(matches.length!==1)return fail();
  return matches[0][1].trim();
 };
-export function verifyReleaseArtifacts({archivePath,feedPath,publicKey,version,build,architecture,sourceCommit,repository='orkunisitmak/banana-studio'}) {
+export function verifyReleaseArtifacts({archivePath,feedPath,publicKey,version,build,architecture,sourceCommit,repository=FORK_REPOSITORY}) {
  if(!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version)||!['arm64','x64'].includes(architecture)||!/^\d+$/.test(build)||!Number.isSafeInteger(Number(build))||Number(build)<1||!/^[a-f0-9]{40}$/.test(sourceCommit)||!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository))return fail();
  const archiveName=`Banana-Studio-${version}-macos-${architecture}.zip`,feedName=`appcast-${architecture}.xml`;
  if(path.basename(archivePath)!==archiveName||path.basename(feedPath)!==feedName)return fail();

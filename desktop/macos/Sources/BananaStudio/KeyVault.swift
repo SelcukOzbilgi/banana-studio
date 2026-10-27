@@ -10,7 +10,7 @@ enum ProviderKey: String, CaseIterable {
 }
 
 enum KeyVault {
-    static let service = "com.bananastudio.provider-keys"
+    static let service = "io.github.selcukozbilgi.bananastudio.provider-keys"
     static func query(_ key: ProviderKey, service: String = KeyVault.service) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: key.rawValue]
     }
