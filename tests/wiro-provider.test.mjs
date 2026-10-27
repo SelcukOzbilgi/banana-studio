@@ -103,6 +103,14 @@ test('schema mapping finds prompt, references, ratio, resolution, quality and co
   assert.equal(mapWiroSchema([{items:[{id:'prompt',type:'textarea',required:true},{id:'style',type:'text',required:true,defaultvalue:'x'}]}]).controls,null);
   assert.equal(mapWiroSchema([{items:[{id:'prompt',type:'textarea',required:true},{id:'steps',type:'number',required:true,defaultvalue:'28'}]}]).controls.fixed.steps,'28');
   assert.equal(mapWiroSchema([{items:[{id:'text',type:'textarea'}]}]).controls,null);
+  // FLUX.2 Pro style: numeric width/height follow the app's ratio and resolution; untouched they stay unset.
+  const flux=mapWiroSchema([{items:[{id:'inputImage',type:'combinefileinput',maxinputlenght:8},{id:'prompt',type:'textarea',required:true},{id:'width',type:'number'},{id:'height',type:'number'},{id:'seed',type:'number'}]}]).controls;
+  assert.deepEqual(flux.size,{width:'width',height:'height',max:2048});
+  assert.deepEqual(wiroCatalogFields(flux,'A lemon'),{prompt:'A lemon'});
+  assert.deepEqual(wiroCatalogFields(flux,'A lemon',{ratio:'16:9',resolution:'1K'}),{prompt:'A lemon',width:'1024',height:'576'});
+  assert.deepEqual(wiroCatalogFields(flux,'A lemon',{ratio:'3:4',resolution:'2K'}),{prompt:'A lemon',width:'1536',height:'2048'});
+  assert.equal(validateWiroOptions(flux,{ratio:'21:9'}),'Unsupported ratio for this Wiro model.');
+  assert.equal(validateWiroOptions(flux,{ratio:'16:9',resolution:'2K'}),null);
 });
 
 test('prices: string or array tables, exact match, deferred prices are never shown as $0',()=>{
@@ -124,6 +132,10 @@ test('catalog entries use clean slugs, drop foreign image hosts, and refresh fla
   const pricier={...entry,prices:[{inputs:{resolution:'1K'},price:0.04,method:'cpr'}]};
   assert.match(refreshWiroEntry(entry,pricier,2).statusNote,/Price changed/);
   assert.equal(refreshWiroEntry(entry,{...entry},2).status,'ok');
+  assert.equal(refreshWiroEntry({...entry,checkedAt:0,prices:[],controls:null},pricier,2).status,'ok','the first load is not reported as a change');
+  assert.equal(wiroPriceSummary(parseWiroPrices([{inputs:{},price:0.0336},{inputs:{},price:0.113}])),'$0.0336–$0.113 per image');
+  const pixel=parseWiroPrices([{inputs:{inputImage:'QUANTITY:0'},price:0.03,priceMethod:'cp-pixel'}]);
+  assert.equal(wiroPriceFor(pixel,{}),null);assert.match(wiroPriceSummary(pixel),/^From \$0\.03 · varies with size/);
 });
 
 test('Task/Detail parsing treats string numerics and only pexit "0" at postprocess end as success',()=>{

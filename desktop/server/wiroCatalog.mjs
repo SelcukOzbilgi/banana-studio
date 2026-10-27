@@ -45,7 +45,7 @@ export function createWiroCatalog({ workspace, post }) {
     async refresh(){
       const models=[];
       for(const entry of read()){
-        try{models.push(refreshWiroEntry(entry,await detail(entry.slug)));}
+        try{const fresh=await detail(entry.slug);models.push(refreshWiroEntry(entry,fresh&&BUILTIN_TITLES[entry.slug]?{...fresh,title:BUILTIN_TITLES[entry.slug]}:fresh));}
         catch(error){models.push({...entry,statusNote:'Could not check this model. Try again later.'});}
       }
       return {models:write(models)};

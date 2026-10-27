@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { isLocalWorkspace } from '../lib/config/runtimeConfig';
-import { isWiroModelId, wiroPriceFor, type WiroModelEntry } from '../lib/wiro/catalog';
+import { isWiroModelId, wiroControlOptions, wiroPriceFor, type WiroModelEntry } from '../lib/wiro/catalog';
 import { getImageModelLabel, IMAGE_MODEL_OPTIONS, type GenerationConfig } from '../types';
 import { getOpenAIImageOptions } from '../lib/images/openaiImage';
 import { Dropdown } from './ControlDropdown';
@@ -45,10 +45,13 @@ export function WiroImageControls({ config, model, onChange }: { config: Generat
   const set = (key: 'ratio' | 'resolution' | 'quality', value: string) => onChange(current => ({ ...current, wiroOptions: { ...current.wiroOptions, [key]: value } }));
   const labels = { ratio: 'Aspect Ratio', resolution: 'Resolution', quality: 'Quality' } as const;
   return <>{(['ratio', 'resolution', 'quality'] as const).map(key => {
-    const control = controls[key];
-    if (!control) return null;
-    return <Dropdown key={key} label={labels[key]} value={config.wiroOptions?.[key] ?? control.default ?? control.options[0]}
-      options={control.options.map(value => ({ value, label: value || 'Model default' }))} onSelect={value => set(key, value)} compact />;
+    const options = wiroControlOptions(controls, key);
+    if (!options) return null;
+    // Width/height models keep their own default size until a ratio or resolution is chosen.
+    const sized = !controls[key];
+    const choices = sized ? ['', ...options] : options;
+    return <Dropdown key={key} label={labels[key]} value={config.wiroOptions?.[key] ?? controls[key]?.default ?? choices[0]}
+      options={choices.map(value => ({ value, label: value || 'Model default' }))} onSelect={value => set(key, value)} compact />;
   })}</>;
 }
 

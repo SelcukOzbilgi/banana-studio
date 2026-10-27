@@ -28,6 +28,8 @@ export type WiroControls = {
   resolution?: WiroSelectControl;
   quality?: WiroSelectControl;
   count?: { id: string; min: number; max: number };
+  /** Numeric width/height inputs, filled from the app's aspect ratio and resolution. */
+  size?: { width: string; height: string; max: number };
   /** Required parameters outside the common controls, sent with their schema default. */
   fixed: Record<string, string>;
 };
@@ -65,6 +67,9 @@ export function mapWiroSchema(parameters: unknown): { controls: WiroControls | n
   const resolution = take(item => item.type === 'select' && /^(resolution|image_?size|output_?resolution)$/i.test(item.id));
   const quality = take(item => item.type === 'select' && /^quality$/i.test(item.id));
   const count = take(item => item.type === 'number' && /^(samples|num_?images|number_?of_?images|count)$/i.test(item.id));
+  const width = !ratio ? take(item => item.type === 'number' && /^width$/i.test(item.id)) : undefined;
+  const height = width ? take(item => item.type === 'number' && /^height$/i.test(item.id)) : undefined;
+  if (width && !height) used.delete(width.id);
   const fixed: Record<string, string> = {};
   for (const item of items) {
     if (used.has(item.id) || !item.required) continue;
@@ -83,6 +88,7 @@ export function mapWiroSchema(parameters: unknown): { controls: WiroControls | n
     ...(resolution && select(resolution) ? { resolution: select(resolution) } : {}),
     ...(quality && select(quality) ? { quality: select(quality) } : {}),
     ...(count ? { count: { id: count.id, min: countMin, max: countMax } } : {}),
+    ...(width && height ? { size: { width: width.id, height: height.id, max: Math.min(Number(width.maxvalue) || 2048, Number(height.maxvalue) || 2048, 4096) } } : {}),
     fixed,
   } };
 }
@@ -100,7 +106,8 @@ export function parseWiroPrices(value: unknown): WiroPriceRow[] {
     return [{ inputs, price, method: text(row.priceMethod, 40) || 'cpr', ...(row.note ? { note: text(row.note, 400) } : {}) }];
   });
 }
-const isDeferredPrice = (row: WiroPriceRow) => row.method === 'cp-readoutput' || row.price === 0;
+// Only per-request/per-output rows are fixed prices; token, pixel and compute-time rows are settled after the task.
+const isDeferredPrice = (row: WiroPriceRow) => !['cpr', 'cpo'].includes(row.method) || row.price === 0;
 /** Price for one request, or null when Wiro computes it after the task finishes. */
 export function wiroPriceFor(prices: WiroPriceRow[], inputs: Record<string, string>): number | null {
   const normalized = Object.fromEntries(Object.entries(inputs).map(([key, value]) => [key, String(value).toLowerCase()]));
@@ -109,8 +116,9 @@ export function wiroPriceFor(prices: WiroPriceRow[], inputs: Record<string, stri
 }
 export function wiroPriceSummary(prices: WiroPriceRow[]): string {
   const fixed = prices.filter(row => !isDeferredPrice(row)).map(row => row.price);
-  if (!fixed.length) return prices.length ? 'Price computed when the task finishes' : 'Price unavailable';
-  const low = Math.min(...fixed), high = Math.max(...fixed), format = (usd: number) => `$${usd < 0.1 ? usd.toFixed(4).replace(/0+$/, '').replace(/\.$/, '') : usd.toFixed(2)}`;
+  if (!fixed.length) return prices.some(row => row.price > 0) ? `From $${Math.min(...prices.filter(row => row.price > 0).map(row => row.price))} · varies with size; actual cost after the task`
+    : 'Price computed when the task finishes';
+  const low = Math.min(...fixed), high = Math.max(...fixed), format = (usd: number) => `$${usd < 1 ? usd.toFixed(4).replace(/0+$/, '').replace(/\.$/, '') : usd.toFixed(2)}`;
   return low === high ? `${format(low)} per image` : `${format(low)}–${format(high)} per image`;
 }
 
@@ -130,6 +138,8 @@ export const isWiroImageModel = (categories: string[]) => categories.some(value 
 /** Compare a stored entry with a fresh Tool/Detail result for the refresh action. */
 export function refreshWiroEntry(previous: WiroModelEntry, fresh: WiroModelEntry | null, now = Date.now()): WiroModelEntry {
   if (!fresh) return { ...previous, status: 'missing', statusNote: 'Wiro no longer lists this model.', checkedAt: now };
+  // The first check only loads prices and inputs; nothing changed from the user's view.
+  if (!previous.checkedAt) return { ...fresh, status: 'ok' };
   const priceChanged = JSON.stringify(previous.prices) !== JSON.stringify(fresh.prices);
   const inputsChanged = JSON.stringify(previous.controls) !== JSON.stringify(fresh.controls);
   const notes = [priceChanged ? 'Price changed.' : '', inputsChanged ? 'Inputs changed.' : ''].filter(Boolean);
@@ -137,14 +147,25 @@ export function refreshWiroEntry(previous: WiroModelEntry, fresh: WiroModelEntry
 }
 
 export type WiroImageOptions = { ratio?: string; resolution?: string; quality?: string };
+/** Ratio and resolution choices for models that take numeric width/height. */
+export const WIRO_SIZE_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16'] as const;
+export const wiroSizeTiers = (size: NonNullable<WiroControls['size']>) => size.max >= 2048 ? ['1K', '2K'] : ['1K'];
+export function wiroSizeFor(size: NonNullable<WiroControls['size']>, ratio = '1:1', tier = '1K'): { width: number; height: number } {
+  const [w, h] = ratio.split(':').map(Number), long = Math.min(tier === '2K' ? 2048 : 1024, size.max);
+  const snap = (value: number) => Math.max(256, Math.floor(value / 16) * 16);
+  return w >= h ? { width: snap(long), height: snap(long * h / w) } : { width: snap(long * w / h), height: snap(long) };
+}
+/** Options a catalog model offers for one common control. */
+export const wiroControlOptions = (controls: WiroControls, key: 'ratio' | 'resolution' | 'quality'): string[] | null =>
+  controls[key]?.options ?? (controls.size && key === 'ratio' ? [...WIRO_SIZE_RATIOS] : controls.size && key === 'resolution' ? wiroSizeTiers(controls.size) : null);
 /** Validate UI choices against the stored controls. Returns an error message or null. */
 export function validateWiroOptions(controls: WiroControls, options: unknown): string | null {
   if (options != null && (typeof options !== 'object' || Array.isArray(options))) return 'Invalid Wiro options.';
   const value = (options || {}) as Record<string, unknown>;
   for (const key of ['ratio', 'resolution', 'quality'] as const) {
-    const control = controls[key];
+    const options = wiroControlOptions(controls, key);
     if (value[key] == null) continue;
-    if (!control || typeof value[key] !== 'string' || !control.options.includes(value[key] as string)) return `Unsupported ${key} for this Wiro model.`;
+    if (!options || typeof value[key] !== 'string' || !options.includes(value[key] as string)) return `Unsupported ${key} for this Wiro model.`;
   }
   return null;
 }
@@ -156,5 +177,10 @@ export function wiroCatalogFields(controls: WiroControls, prompt: string, option
     if (control && chosen != null && chosen !== '') fields[control.id] = chosen;
   }
   if (controls.count) fields[controls.count.id] = String(controls.count.min);
+  // Without a choice, width/height stay unset so the model keeps its default (often the input image size).
+  if (controls.size && (options.ratio || options.resolution)) {
+    const { width, height } = wiroSizeFor(controls.size, options.ratio, options.resolution);
+    fields[controls.size.width] = String(width); fields[controls.size.height] = String(height);
+  }
   return fields;
 }
