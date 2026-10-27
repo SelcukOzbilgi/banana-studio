@@ -2,6 +2,7 @@ import React from 'react';
 import { ArrowLeft, Layers, ShieldCheck, Sparkles } from 'lucide-react';
 import { TEXT_MODEL_OPTIONS, type GeneratedMedia } from '../types';
 import { normalizePromptPreparation } from '../lib/prompts/promptPreparation';
+import { PROVIDER_LABELS } from '../lib/providers';
 import { getRecordedImageEditDetails } from './recordedGenerationDetails';
 
 const ACTION_LABELS = { enhance: 'Enhance', brainstorm: 'Brainstorm', variation: 'Variation' };
@@ -23,6 +24,7 @@ export const PromptPreparationDetails: React.FC<{ media: GeneratedMedia }> = ({ 
             <div className="mb-2 text-xs font-semibold text-violet-300">{ACTION_LABELS[preparation.action]}</div>
             <div className="break-words text-sm font-semibold text-white">{modelLabel || preparation.model}</div>
             {modelLabel && <div className="mt-1 break-all font-mono text-xs text-gray-500">{preparation.model}</div>}
+            {preparation.provider && <div className="mt-2 text-xs text-gray-400">Provider: {PROVIDER_LABELS[preparation.provider]}</div>}
             {preparation.reasoningEffort && <div className="mt-2 text-xs text-gray-400">Reasoning: {settingLabel(preparation.reasoningEffort)}</div>}
             {preparation.thinkingLevel && <div className="mt-2 text-xs text-gray-400">Thinking: {settingLabel(preparation.thinkingLevel)}</div>}
           </>

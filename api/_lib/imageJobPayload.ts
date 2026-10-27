@@ -9,6 +9,8 @@ import { normalizePromptPreparation } from '../../src/lib/prompts/promptPreparat
 import { normalizeYouTubeSource } from '../../src/lib/youtube/youtubeSource.js';
 import { canonicalMediaUrl, signedMediaUrl } from './imageStorage.js';
 import { MediaAccessError } from '../../src/lib/references/mediaAccess.js';
+import { isWiroModelId, validateWiroOptions, type WiroControls } from '../../src/lib/wiro/catalog.js';
+import { loadWiroControls } from './wiro.js';
 
 export class ImageJobInputError extends Error {}
 const invalid = (message: string): never => { throw new ImageJobInputError(message); };
@@ -27,12 +29,18 @@ export const privateReferencePath = (value: string): string | null => {
  * worker/claim flags are copied into durable storage. */
 export const prepareImageJobPayload = async (body: any, callerDb: any) => {
   if (!body || typeof body !== 'object' || Array.isArray(body)) invalid('Invalid image job.');
-  if (!['gpt-image-2.5-sunburst','gemini-3-pro-image-preview','gemini-nano-banana-2.1'].includes(body.model) || typeof body.id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.id)) invalid('Invalid image job ID or model.');
+  if ((!['gpt-image-2.5-sunburst','gemini-3-pro-image-preview','gemini-nano-banana-2.1'].includes(body.model) && !isWiroModelId(body.model)) || typeof body.id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.id)) invalid('Invalid image job ID or model.');
   if (typeof body.prompt !== 'string' || !body.prompt.trim() || body.prompt.length > 32000) invalid('Prompt must contain 1–32,000 characters.');
   if (!['1:1','4:3','3:4','16:9','9:16'].includes(body.aspectRatio) || !['1K','2K','4K'].includes(body.resolution)) invalid('Invalid ratio or resolution.');
   if (body.options != null && (typeof body.options !== 'object' || Array.isArray(body.options))) invalid('Invalid image options.');
   let provider;
   try { provider = chooseProvider(body.model, body.provider); } catch (error) { return invalid((error as Error).message); }
+  let wiroControls: WiroControls | undefined;
+  if (isWiroModelId(body.model)) {
+    try { wiroControls = await loadWiroControls(callerDb, body.model); } catch (error) { return invalid((error as Error).message); }
+    const wiroError = validateWiroOptions(wiroControls, body.wiroOptions);
+    if (wiroError) invalid(wiroError);
+  }
   const options = getOpenAIImageOptions(body.model === SUNBURST_MODEL ? body.options : undefined);
   const optionError = validateOpenAIImageOptions(options) || validateOpenAIImageSize(getOpenAIImageSize({ ...body, openaiImageOptions: options }));
   if (optionError) invalid(optionError);
@@ -40,7 +48,8 @@ export const prepareImageJobPayload = async (body: any, callerDb: any) => {
   if (body.imagePromptCategory != null && !['simple','youtube_thumbnail','product_shot','portrait','social_media','custom'].includes(body.imagePromptCategory)) invalid('Invalid image category.');
   if (body.folderId != null && (typeof body.folderId !== 'string' || body.folderId.length > 200)) invalid('Invalid folder.');
   const references = body.referenceImages ?? [];
-  if (!Array.isArray(references) || references.length > (body.model === SUNBURST_MODEL ? 16 : 14) || body.mask != null || body.maskUrl != null) invalid('Invalid reference images.');
+  const referenceLimit = wiroControls ? wiroControls.images?.max ?? 0 : body.model === SUNBURST_MODEL ? 16 : 14;
+  if (!Array.isArray(references) || references.length > referenceLimit || body.mask != null || body.maskUrl != null) invalid(referenceLimit ? 'Invalid reference images.' : 'This model does not accept reference images.');
   const refs: ReferenceImage[] = references.map((ref: any) => {
     if (!ref || typeof ref.id !== 'string' || !ref.id || ref.id.length > 128 || typeof ref.data !== 'string' || ref.data.length > 4000) invalid('Invalid reference image.');
     let url: URL;
@@ -76,13 +85,14 @@ export const prepareImageJobPayload = async (body: any, callerDb: any) => {
     displayPrompt: typeof body.displayPrompt === 'string' && body.displayPrompt.length <= 32000 ? body.displayPrompt : body.prompt,
     originalPrompt: body.originalPrompt, aspectRatio: body.aspectRatio, resolution: body.resolution,
     options, referenceImages: refs, privateReferencePaths, folderId: body.folderId || null,
+    ...(wiroControls ? { wiroOptions: Object.fromEntries((['ratio','resolution','quality'] as const).filter(key => typeof body.wiroOptions?.[key] === 'string').map(key => [key, body.wiroOptions[key]])) } : {}),
     imagePromptCategory: body.imagePromptCategory, promptPreparation: normalizePromptPreparation(body.promptPreparation), youtubeSource: normalizeYouTubeSource(body.youtubeSource) };
   const prepared = prepareSunburstGeneration(payload.prompt, refs, { ...payload, imageModel: body.model, openaiImageOptions: options });
   if (prepared.prompt.length > 32000) invalid('Shorten the prompt to leave room for reference instructions.');
   const metadata = { generationProvider: provider, providerModel: payload.model, originalPrompt: payload.originalPrompt, youtubeSource: payload.youtubeSource, promptPreparation: payload.promptPreparation,
     openaiImageOptions: payload.model === SUNBURST_MODEL ? options : undefined, imagePromptCategory: payload.imagePromptCategory,
     imageGenerationPrompt: prepared.prompt, imageGenerationReferenceIds: prepared.referenceImages.map(ref=>ref.id),
-    imageRequestedSize: payload.model === SUNBURST_MODEL ? getOpenAIImageSize({ ...payload, openaiImageOptions: options }) : `${payload.resolution} · ${payload.aspectRatio}` };
+    imageRequestedSize: payload.model === SUNBURST_MODEL ? getOpenAIImageSize({ ...payload, openaiImageOptions: options }) : wiroControls ? 'Model settings' : `${payload.resolution} · ${payload.aspectRatio}` };
   return { payload, metadata };
 };
 

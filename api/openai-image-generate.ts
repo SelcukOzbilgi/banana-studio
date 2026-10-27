@@ -15,6 +15,8 @@ import { readImageDimensions } from './_lib/imageDimensions.js';
 import { saveGeneratedImage, readStoredImage, imageSha256, signedMediaUrl, canonicalMediaUrl } from './_lib/imageStorage.js';
 import { startOpenAIRequest } from './_lib/openaiGuard.js';
 import { openAIErrorMessage, safeOpenAIErrorCode, imageRateLimitDelay } from './_lib/openaiError.js';
+import { loadWiroControls, WiroError, WiroTaskPending, wiroPolling } from './_lib/wiro.js';
+import { isWiroModelId, validateWiroOptions, WIRO_CUSTOM_EDGE, type WiroControls } from '../src/lib/wiro/catalog.js';
 
 // Match the existing deployment's 300-second function budget. No automatic
 // retry of a billable request; the saved row can be recovered after a reload.
@@ -38,6 +40,12 @@ type ImageExecutionContext = {
   guard?: { id:string; finish(outcome:'completed'|'failed'|'rejected',requestId?:string|null,status?:number):Promise<void> };
   dispatch?: (metadata:Record<string,unknown>)=>Promise<boolean>;
   deferRateLimit?: (seconds:number,requestId:string|null,reason:'rate'|'quota')=>Promise<boolean>;
+  /** Durable worker: persist a provider task ID right after submission. */
+  recordTask?: (taskId:string)=>Promise<void>;
+  /** Durable worker: recover this already submitted provider task; never submit again. */
+  resumeTask?: { taskId:string };
+  /** Durable worker: stop waiting for the provider task after this time (ms). */
+  providerDeadline?: number;
 };
 
 /** Shared provider/storage pipeline. A durable worker supplies its server-owned
@@ -49,7 +57,7 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; }
   catch { return res.status(400).json({ error: 'Invalid JSON body' }); }
   if (!body || typeof body !== 'object' || Array.isArray(body)) return res.status(400).json({ error: 'Invalid request body' });
-  if (!['gpt-image-2.5-sunburst','gemini-3-pro-image-preview','gemini-nano-banana-2.1'].includes(body.model)) return res.status(400).json({ error: 'Unsupported OpenAI image model' });
+  if (!['gpt-image-2.5-sunburst','gemini-3-pro-image-preview','gemini-nano-banana-2.1'].includes(body.model) && !isWiroModelId(body.model)) return res.status(400).json({ error: 'Unsupported OpenAI image model' });
   if (typeof body.id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.id)) return res.status(400).json({ error: 'Invalid generation ID' });
   if (typeof body.prompt !== 'string' || !body.prompt.trim() || body.prompt.length > 32000) return res.status(400).json({ error: 'Prompt must contain 1–32,000 characters.' });
   if (!['1:1', '4:3', '3:4', '16:9', '9:16'].includes(body.aspectRatio) || !['1K', '2K', '4K'].includes(body.resolution)) return res.status(400).json({ error: 'Invalid ratio or resolution.' });
@@ -57,12 +65,19 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
   let provider: AIProvider;
   try { provider = chooseProvider(body.model, body.provider ?? (context.guard && body.model === SUNBURST_MODEL ? 'openai' : 'auto')); } catch (error) { return res.status(503).json({ error: (error as Error).message }); }
   const key = process.env[PROVIDER_KEYS[provider]]!;
+  let wiroControls: WiroControls | undefined;
+  if (isWiroModelId(body.model)) {
+    try { wiroControls = await loadWiroControls(db, body.model); } catch (error) { return res.status(400).json({ error: (error as Error).message }); }
+    const wiroError = validateWiroOptions(wiroControls, body.wiroOptions);
+    if (wiroError) return res.status(400).json({ error: wiroError });
+  }
+  const referenceLimit = wiroControls ? wiroControls.images?.max ?? 0 : body.model === SUNBURST_MODEL ? 16 : 14;
   const options = getOpenAIImageOptions(body.model === SUNBURST_MODEL ? body.options : undefined);
   let size = getOpenAIImageSize({ ...body, openaiImageOptions: options });
   const optionError = validateOpenAIImageOptions(options) || validateOpenAIImageSize(size);
   if (optionError) return res.status(400).json({ error: optionError });
   const refs = body.referenceImages ?? [];
-  if (!Array.isArray(refs) || refs.length > (body.model === SUNBURST_MODEL ? 16 : 14) || refs.some((r: any) => !r || !isImageUrl(r.data))) return res.status(400).json({ error: 'Provide up to 16 HTTPS reference images.' });
+  if (!Array.isArray(refs) || refs.length > referenceLimit || refs.some((r: any) => !r || !isImageUrl(r.data))) return res.status(400).json({ error: referenceLimit ? `Provide up to ${referenceLimit} HTTPS reference images.` : 'This model does not accept reference images.' });
   if (refs.some((r: any) => r.isEditSource != null && typeof r.isEditSource !== 'boolean')) return res.status(400).json({ error: 'Invalid edit source role.' });
   if (refs.some((r: any) => r.isThumbnailStyle != null && typeof r.isThumbnailStyle !== 'boolean')) return res.status(400).json({ error: 'Invalid thumbnail style role.' });
   if (refs.some((r: any) => r.editRegion != null && !isValidEditRegion(r.editRegion))) return res.status(400).json({ error: 'Invalid edit area.' });
@@ -102,24 +117,31 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
     return res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid prompt references.' });
   }
   if (generationPrompt.length > 32000) return res.status(400).json({ error: 'Shorten the prompt to leave room for reference and canvas instructions (32,000 characters total).' });
+  // Wiro serves exact Sunburst canvases (custom size, protected edits) through its width/height variant.
+  const exactSize = provider === 'wiro' && body.model === SUNBURST_MODEL && (options.size === 'custom' || !!protectedSource);
+  if (exactSize && size.split('x').map(Number).some(edge => edge < WIRO_CUSTOM_EDGE.min || edge > WIRO_CUSTOM_EDGE.max)) {
+    return res.status(400).json({ error: `Wiro exact sizes need both edges between ${WIRO_CUSTOM_EDGE.min} and ${WIRO_CUSTOM_EDGE.max} px (requested ${size}). Choose another provider or size.` });
+  }
   const guard = context.guard || await startOpenAIRequest(req, res, user, 'image', body.id);
   if (!guard) return;
   let providerStatus: number | undefined;
   let providerErrorCode: string | undefined;
   let outcome: 'completed' | 'failed' | 'rejected' = 'rejected';
+  let pending = false;
   // Keep references/settings and the result durable even if the browser closes.
   // An INSERT also makes duplicate submissions with the same ID fail before
   // OpenAI is charged; no upsert may take over another user's generation.
   const startedAt = Date.now();
-  const metadata: Record<string, unknown> = { generationProvider: provider, providerModel: imageProviderModel(provider, body.model, generationReferences.length > 0), originalPrompt: body.originalPrompt, youtubeSource: normalizeYouTubeSource(body.youtubeSource),
+  const metadata: Record<string, unknown> = { generationProvider: provider, providerModel: imageProviderModel(provider, body.model, generationReferences.length > 0, exactSize), originalPrompt: body.originalPrompt, youtubeSource: normalizeYouTubeSource(body.youtubeSource),
     promptPreparation: normalizePromptPreparation(body.promptPreparation),
     openaiImageOptions: body.model !== SUNBURST_MODEL ? undefined : protectedSource ? { ...options, size: 'custom', width: protectedSource.info.width, height: protectedSource.info.height } : options,
     openaiStartedAt: startedAt, generationStartedAt: startedAt,
     imagePromptCategory: body.imagePromptCategory, imageGenerationPrompt: generationPrompt,
-    imageGenerationReferenceIds: generationReferences.map(ref => ref.id), imageRequestedSize: body.model === SUNBURST_MODEL || protectedSource ? size : `${body.resolution} · ${body.aspectRatio}`, openaiAuditId: guard.id };
+    imageGenerationReferenceIds: generationReferences.map(ref => ref.id), imageRequestedSize: body.model === SUNBURST_MODEL || protectedSource ? size : wiroControls ? [body.wiroOptions?.resolution ?? wiroControls.resolution?.default, body.wiroOptions?.ratio ?? wiroControls.ratio?.default].filter(Boolean).join(' · ') || 'Model default' : `${body.resolution} · ${body.aspectRatio}`, openaiAuditId: guard.id,
+    ...(wiroControls ? { wiroOptions: body.wiroOptions || {} } : {}) };
   if (editReference?.id.startsWith('gallery-')) metadata.imageEditSourceId = editReference.id.slice(8);
   try {
-    const { error: insertError } = context.dispatch ? { error:null } : await db.from('generations').insert({
+    const { error: insertError } = context.dispatch || context.resumeTask ? { error:null } : await db.from('generations').insert({
       id: body.id, user_id: user.id, prompt: storedPrompt, url: '', type: 'image',
       aspect_ratio: body.aspectRatio, resolution: body.resolution, image_model: body.model,
       created_at: startedAt, folder_id: body.folderId || null, is_favorite: false,
@@ -135,20 +157,29 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
     const input: Record<string, unknown> = { resolution: body.resolution, aspect_ratio: body.aspectRatio,
       model: body.model, prompt: generationPrompt, n: 1, size, quality: options.quality,
       background: options.background, output_format: options.outputFormat, moderation: options.moderation,
-      user: user.id,
+      user: user.id, ...(exactSize ? { exact_size: true } : {}),
     };
     // Let Sunburst use its default input fidelity for generation and edits.
     if (generationReferences.length) input.images = await Promise.all(generationReferences.map(async ref => ({ image_url: await providerImageUrl(db, ref.data) })));
 
-    if (context.dispatch && !await context.dispatch(metadata)) {
+    if (context.dispatch && !context.resumeTask && !await context.dispatch(metadata)) {
       await guard.finish('rejected');
       return res.status(409).json({ error:'The saved worker claim is no longer active. No provider request was sent.' });
     }
     outcome = 'failed';
-    const response = await requestImage(provider, body.model, input, db, key, guard.id);
+    const response = await requestImage(provider, body.model, input, db, key, guard.id, provider !== 'wiro' ? {} : {
+      wiroControls, wiroOptions: body.wiroOptions, resumeTaskId: context.resumeTask?.taskId,
+      pollUntil: context.providerDeadline ? Math.min(Date.now() + wiroPolling.windowMs, context.providerDeadline) : undefined,
+      onTask: async taskId => {
+        metadata.providerTaskId = taskId; metadata.openaiRequestId = taskId;
+        if (context.recordTask) await context.recordTask(taskId);
+        else await db.from('generations').update({ metadata }).eq('id', body.id).eq('user_id', user.id);
+      },
+    });
     providerStatus = response.status;
     const data = await response.json().catch(() => null);
     metadata.openaiRequestId = response.headers.get('x-request-id');
+    if (provider === 'wiro') metadata.providerTaskId = metadata.openaiRequestId;
     if (!response.ok) {
       providerErrorCode = safeOpenAIErrorCode(data);
       const quotaWait = response.status===429 && providerErrorCode==='insufficient_quota' && data?.usage==null
@@ -163,13 +194,15 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
         return res.status(202).json({ code:deferred?'IMAGE_PROVIDER_RATE_WAIT':'IMAGE_PROVIDER_RATE_STATE_UNKNOWN',retryAfter });
       }
       metadata.openaiError = { status: response.status, ...(providerErrorCode ? { code: providerErrorCode } : {}) };
-      const error = new Error(provider === 'openai' ? openAIErrorMessage(response.status, providerErrorCode) : `${PROVIDER_LABELS[provider]} rejected the image request (${response.status}). Check the prompt, references, model access and account credit.`) as Error & { status?: number };
+      const error = new Error(provider === 'openai' ? openAIErrorMessage(response.status, providerErrorCode)
+        : provider === 'wiro' && typeof data?.error?.message === 'string' ? `Wiro could not create the image (task ${metadata.openaiRequestId}): ${data.error.message.slice(0, 200)} Wiro bills only successful tasks.`
+        : `${PROVIDER_LABELS[provider]} rejected the image request (${response.status}). Check the prompt, references, model access and account credit.`) as Error & { status?: number };
       error.status = response.status;
       throw error;
     }
     const usd = provider === 'openai' ? calculateOpenAIImageCost(data?.usage) : typeof data?.usage?.cost === 'number' && Number.isFinite(data.usage.cost) && data.usage.cost >= 0 ? data.usage.cost : null;
     metadata.openaiUsage = data?.usage ?? null;
-    metadata.generationCost = usd == null ? null : { usd, source: 'provider_usage' };
+    metadata.generationCost = usd == null ? null : { usd, source: provider === 'wiro' ? 'provider_actual' : 'provider_usage' };
     // Log returned usage before storage, since a storage failure doesn't undo
     // the provider charge. Missing usage remains NULL, never a guessed price.
     const { error: usageError } = await db.from('usage_logs').insert({
@@ -215,7 +248,15 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
     // deployment's response-size limit. No credential is sent to the browser.
     return res.status(200).json({ id: body.id, url, storagePath, referenceImages: safeRefs, metadata });
   } catch (error: any) {
-    const message = error?.name === 'TimeoutError'
+    if (error instanceof WiroTaskPending && (context.dispatch || context.resumeTask) && (!context.providerDeadline || Date.now() < context.providerDeadline)) {
+      // Still running at Wiro: keep the job dispatched; the queue resumes polling this task later.
+      pending = true;
+      return res.status(202).json({ code: 'IMAGE_PROVIDER_TASK_PENDING', retryAfter: 10, taskId: error.taskId });
+    }
+    const message = error instanceof WiroTaskPending
+      ? `Wiro task ${error.taskId} did not finish in time. It was not resubmitted. Check Wiro usage before generating again.`
+      : error instanceof WiroError ? error.message
+      : error?.name === 'TimeoutError'
       ? `${PROVIDER_LABELS[provider]} exceeded the request time limit. It may still have billed this request. Check usage before generating again.`
       : error instanceof SavedImageError ? error.message : provider === 'openai' ? openAIErrorMessage(error?.status, providerErrorCode) : `${PROVIDER_LABELS[provider]} could not finish the image. Check provider usage before submitting again.`;
     console.warn('OpenAI image request failed', { id: body.id, auditId: guard.id, status: providerStatus ?? null,
@@ -224,6 +265,6 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
     await guard.finish('failed', typeof metadata.openaiRequestId === 'string' ? metadata.openaiRequestId : null, providerStatus);
     return res.status(error?.status >= 400 && error?.status <= 599 ? error.status : 502).json({ error: message });
   } finally {
-    await guard.finish(outcome, typeof metadata.openaiRequestId === 'string' ? metadata.openaiRequestId : null, providerStatus);
+    if (!pending) await guard.finish(outcome, typeof metadata.openaiRequestId === 'string' ? metadata.openaiRequestId : null, providerStatus);
   }
 }

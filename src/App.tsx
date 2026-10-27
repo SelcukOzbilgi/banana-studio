@@ -31,6 +31,7 @@ import { getGalleryEditSourceId } from './lib/gallery/galleryEditJobs';
 import { mergeLoadedGalleryHistory } from './lib/gallery/galleryHistoryMerge';
 import { mergeReconciledGalleryCosts } from './lib/gallery/galleryBillingRefresh';
 import { createPromptPreparation } from './lib/prompts/promptPreparation';
+import type { AIProvider } from './lib/providers';
 import { resolveTextModelPreferences } from './lib/prompts/textModels';
 
 const resolveImageModel = (value: unknown): GenerationConfig['imageModel'] => getActiveImageModel(value);
@@ -1456,7 +1457,8 @@ const AuthorizedWorkspace: React.FC<{
       }
 
       // Generate a variation of the prompt
-      const textOptions = await resolveTextModelPreferences();
+      let textProvider: AIProvider | undefined;
+      const textOptions = { ...await resolveTextModelPreferences(), onProvider: (provider: AIProvider) => { textProvider = provider; } };
       const variedPrompt = await generatePromptVariation(
         resolved.prompt,
         variationReferences,
@@ -1472,7 +1474,7 @@ const AuthorizedWorkspace: React.FC<{
       // Use the same config as the original image
       const variationConfig: GenerationConfig = {
         prompt: variedPrompt,
-        promptPreparation: createPromptPreparation('variation', textOptions),
+        promptPreparation: createPromptPreparation('variation', { ...textOptions, provider: textProvider }),
         youtubeSource: resolved.youtubeSource,
         count: 1,
         aspectRatio: resolved.aspectRatio,
