@@ -49,11 +49,12 @@ Piksel koruması uygulama tarafında (`compositeProtectedEdit`); sağlayıcını
 
 ## Aşamalar
 
-**Aşama 0 — fork hijyeni ve indirilebilir build**
-- Bundle ID, uygulama adı, Keychain servis adı (`KeyVault.service`), veri klasörü (`WorkspaceProcess.dataDirectory`) upstream'den farklı olsun.
-- Node 24.19.0 → 24.22.1 (`desktop/node-runtime.json`, hash'ler resmi SHASUMS256'dan).
-- `--development` build (Sparkle güncellemesi kapalı); bayraksız build kullanılırsa `SUFeedURL` ve `SparklePublicKey.txt` fork'a ait olmalı.
-- GitHub Actions ile macOS build → indirilebilir `.zip` (artifact/release, fork'ta).
+**Aşama 0 — fork hijyeni ve indirilebilir build** (yapıldı, `efe/fork-setup`)
+- Görünen ad ve veri klasörü upstream ile aynı kalır: `Banana Studio.app`, `~/Library/Application Support/Banana Studio` (Efe'nin Mac'inde upstream kurulu değil). Görünmeyen ayrım: bundle ID `io.github.selcukozbilgi.bananastudio` (`scripts/package-macos.mjs`), Keychain servisi `io.github.selcukozbilgi.bananastudio.provider-keys` (`KeyVault.service`). Windows'a dokunulmadı.
+- Node 24.22.1 (`desktop/node-runtime.json`, CI `node-version`). Arşiv hash'leri resmi `SHASUMS256.txt` ile eşleşti; `binarySha256`/`licenseSha256` arşivler açılıp hesaplandı. `SHASUMS256.txt.sig` GPG ile doğrulanmadı (makinede gpg yok).
+- Güncellemeler: Efe'nin build'leri `--development`. Bu modda `BananaDevelopmentBuild=true`, `SUEnableAutomaticChecks=false` ve `App.swift` Sparkle updater'ını hiç başlatmaz. İkinci katman: `SUFeedURL` ve imza/appcast linkleri fork'a bakar (`scripts/fork-identity.mjs`). Üçüncü katman: `--community` ya da notarize build, `SparklePublicKey.txt` hâlâ upstream anahtarıysa açık bir hatayla durur (`assertForkUpdateChannel`, `tests/fork-identity.test.mjs`). Fork'a Sparkle güncellemesi istenirse: yeni anahtar üret, açık yarısını `SparklePublicKey.txt`'ye koy, `sign-macos-release.mjs` akışını izle.
+- `verify.yml` macOS işi artık `--community --prepare` paketlemez (kapı onu bilerek reddeder); yerine development app'i arşivler.
+- CI: `.github/workflows/efe-macos-build.yml` (`workflow_dispatch` ve `efe-v*` tag). arm64 `--development` build, `Banana Studio.app` → `ditto --norsrc` zip, artifact `banana-studio-macos-arm64`; `efe-v*` tag'inde fork'ta prerelease'e eklenir.
 
 **Aşama 1 — görsel**
 0. Wiro konsolunda tek ucuz görsel; `outputs` yapısı ve CDN host'unu not et.
