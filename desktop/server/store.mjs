@@ -1,4 +1,4 @@
-import { MODEL_ROUTES } from '../../src/lib/providers.ts';
+import { modelRoutes } from '../../src/lib/providers.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID, createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -107,8 +107,9 @@ export class LocalWorkspace {
   }
   rpc(name,args,trusted) {
     if(name==='get_provider_preferences')return this.setting('providerRoutes')||{};
+    if(name==='get_wiro_models'){const saved=this.setting('wiroModels');return {models:Array.isArray(saved?.models)?saved.models:[]};}
     if(name==='save_provider_preference'){
-      if(!MODEL_ROUTES[args.p_model] || args.p_provider!=='auto'&&!MODEL_ROUTES[args.p_model].includes(args.p_provider))throw new Error('Unsupported provider choice.');
+      const routes=modelRoutes(args.p_model);if(!routes || args.p_provider!=='auto'&&!routes.includes(args.p_provider))throw new Error('Unsupported provider choice.');
       this.setting('providerRoutes',{...(this.setting('providerRoutes')||{}),[args.p_model]:args.p_provider});return true;
     }
     if(name==='get_text_model_preferences'||name==='save_text_model_preferences') {

@@ -1,15 +1,57 @@
 import { GoogleGenAI } from '@google/genai';
 import { OPENROUTER_MODELS, type AIProvider } from '../../src/lib/providers.js';
 import { providerImageData } from './providerMedia.js';
+import { requestWiroImage, WiroError } from './wiro.js';
+import { WIRO_BUILTIN_MODELS, WIRO_CUSTOM_EDGE, WIRO_SUNBURST_CUSTOM, wiroCatalogFields, wiroSlugForModel, type WiroControls, type WiroImageOptions } from '../../src/lib/wiro/catalog.js';
 
-export const imageProviderModel = (provider: AIProvider, model: string, references: boolean): string => provider === 'openrouter'
+export const imageProviderModel = (provider: AIProvider, model: string, references: boolean, exactSize = false): string => provider === 'wiro'
+  ? model === 'gpt-image-2.5-sunburst' && exactSize ? WIRO_SUNBURST_CUSTOM : wiroSlugForModel(model) || model
+  : provider === 'openrouter'
   ? OPENROUTER_MODELS[model] : provider === 'fal'
     ? model === 'gpt-image-2.5-sunburst' ? `openai/gpt-image-2.5/sunburst/${references ? 'edit' : 'text-to-image'}`
       : `${model === 'gemini-nano-banana-2.1' ? 'google/nano-banana-2.1' : 'fal-ai/nano-banana-pro'}${references ? '/edit' : ''}`
     : model;
 
+export type ImageRequestOptions = {
+  /** Wiro: persist the task ID before polling. */
+  onTask?: (taskId: string) => Promise<void> | void;
+  /** Wiro: recover an already submitted task without a new Run. */
+  resumeTaskId?: string;
+  pollUntil?: number;
+  /** Wiro catalog models: controls from the saved Tool/Detail schema. */
+  wiroControls?: WiroControls;
+  wiroOptions?: WiroImageOptions;
+};
+
+/** Fixed Wiro fields for the three built-in app models (schemas checked 2026-10-27). */
+export function wiroBuiltinRequest(model: string, input: Record<string, any>): { slug: string; fields: Record<string, string>; imageField: { id: string; type: string } } {
+  const imageField = { id: 'inputImage', type: 'combinefileinput' };
+  if (model === 'gpt-image-2.5-sunburst') {
+    // Wiro has no "auto" quality; use the model's schema default (low).
+    const quality = ['low', 'medium', 'high', 'xhigh', 'max'].includes(input.quality) ? input.quality : 'low';
+    const common = { prompt: input.prompt, quality, samples: '1', background: input.background || 'auto', outputFormat: input.output_format || 'png', moderation: input.moderation || 'low' };
+    if (input.exact_size) {
+      const [width, height] = String(input.size).split('x').map(Number);
+      if (![width, height].every(edge => Number.isInteger(edge) && edge >= WIRO_CUSTOM_EDGE.min && edge <= WIRO_CUSTOM_EDGE.max)) throw new WiroError(`Wiro exact sizes need both edges between ${WIRO_CUSTOM_EDGE.min} and ${WIRO_CUSTOM_EDGE.max} px.`);
+      return { slug: WIRO_SUNBURST_CUSTOM, fields: { ...common, width: String(width), height: String(height) }, imageField };
+    }
+    return { slug: WIRO_BUILTIN_MODELS[model], fields: { ...common, resolution: String(input.resolution || '1K').toLowerCase(), ratio: input.aspect_ratio || '1:1' }, imageField };
+  }
+  if (!WIRO_BUILTIN_MODELS[model]) throw new WiroError('Unsupported Wiro model.');
+  return { slug: WIRO_BUILTIN_MODELS[model], fields: { prompt: input.prompt, resolution: input.resolution || '1K', aspectRatio: input.aspect_ratio || '1:1',
+    ...(model === 'gemini-nano-banana-2.1' ? { outputFormat: 'png' } : {}) }, imageField };
+}
+
 /** All destinations and fields are server-owned. One paid request, no provider retry. */
-export async function requestImage(provider: AIProvider, model: string, input: Record<string, any>, db: any, key: string, auditId: string): Promise<Response> {
+export async function requestImage(provider: AIProvider, model: string, input: Record<string, any>, db: any, key: string, auditId: string, options: ImageRequestOptions = {}): Promise<Response> {
+  if (provider === 'wiro') {
+    const images = options.resumeTaskId ? [] : await Promise.all((input.images || []).map((image: any) => providerImageData(db, image.image_url)));
+    const request = options.wiroControls
+      ? { slug: wiroSlugForModel(model)!, fields: wiroCatalogFields(options.wiroControls, input.prompt, options.wiroOptions), imageField: options.wiroControls.images }
+      : wiroBuiltinRequest(model, input);
+    if (!request.slug) throw new WiroError('Unsupported Wiro model.');
+    return requestWiroImage({ ...request, images, onTask: options.onTask, resumeTaskId: options.resumeTaskId, pollUntil: options.pollUntil });
+  }
   const signal = AbortSignal.timeout(250_000);
   const { resolution, aspect_ratio, ...openaiInput } = input;
   if (provider === 'openai') return fetch(`https://api.openai.com/v1/images/${input.images?.length ? 'edits' : 'generations'}`, {

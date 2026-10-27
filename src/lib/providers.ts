@@ -1,17 +1,20 @@
 /** Application routes, verified against the providers' catalogues on 2026-10-20.
  * Auto selects an available route BEFORE submission, never after a paid call. */
-export type AIProvider = 'openai' | 'openrouter' | 'gemini' | 'fal' | 'evolink';
+import { isWiroModelId } from './wiro/catalog.ts';
+export type AIProvider = 'wiro' | 'openai' | 'openrouter' | 'gemini' | 'fal' | 'evolink';
 export type ProviderChoice = AIProvider | 'auto';
 export const PROVIDER_LABELS: Record<AIProvider, string> = {
-  openai: 'OpenAI', openrouter: 'OpenRouter', gemini: 'Google Gemini', fal: 'fal.ai', evolink: 'EvoLink',
+  wiro: 'Wiro', openai: 'OpenAI', openrouter: 'OpenRouter', gemini: 'Google Gemini', fal: 'fal.ai', evolink: 'EvoLink',
 };
 export const PROVIDER_KEYS: Record<AIProvider, string> = {
-  openai: 'OPENAI_API_KEY', openrouter: 'OPENROUTER_API_KEY', gemini: 'GEMINI_API_KEY', fal: 'FAL_KEY', evolink: 'EVOLINK_API_KEY',
+  wiro: 'WIRO_API_KEY', openai: 'OPENAI_API_KEY', openrouter: 'OPENROUTER_API_KEY', gemini: 'GEMINI_API_KEY', fal: 'FAL_KEY', evolink: 'EVOLINK_API_KEY',
 };
+/** Wiro signs every request with a key and a secret; both must be configured. */
+export const PROVIDER_SECRET_KEYS: Partial<Record<AIProvider, string>> = { wiro: 'WIRO_API_SECRET' };
 export const MODEL_ROUTES: Record<string, readonly AIProvider[]> = {
-  'gpt-image-2.5-sunburst': ['openai', 'openrouter', 'fal'],
-  'gemini-3-pro-image-preview': ['fal', 'gemini', 'openrouter'],
-  'gemini-nano-banana-2.1': ['fal', 'gemini', 'openrouter'],
+  'gpt-image-2.5-sunburst': ['wiro', 'openai', 'openrouter', 'fal'],
+  'gemini-3-pro-image-preview': ['wiro', 'fal', 'gemini', 'openrouter'],
+  'gemini-nano-banana-2.1': ['wiro', 'fal', 'gemini', 'openrouter'],
   'anthropic/claude-opus-5.5': ['openrouter'],
   'gpt-6.1-sol': ['openai', 'openrouter'],
   'gemini-3.8-flash': ['gemini', 'openrouter'],
@@ -19,9 +22,13 @@ export const MODEL_ROUTES: Record<string, readonly AIProvider[]> = {
   'seedance-2.5': ['evolink', 'fal', 'openrouter'],
   'minimax-h3': ['fal'],
 };
+/** Wiro catalog models (`wiro:<owner>/<model>`) are served only by Wiro. */
+const WIRO_ONLY: readonly AIProvider[] = ['wiro'];
+export const modelRoutes = (model: string): readonly AIProvider[] | undefined => isWiroModelId(model) ? WIRO_ONLY
+  : Object.hasOwn(MODEL_ROUTES, model) ? MODEL_ROUTES[model] : undefined;
 export type ProviderAvailability = Partial<Record<AIProvider, boolean>>;
 export function resolveProvider(model: string, choice: unknown, available: ProviderAvailability): AIProvider {
-  const routes = MODEL_ROUTES[model];
+  const routes = modelRoutes(model);
   if (!Array.isArray(routes)) throw new Error('Unsupported model.');
   if (choice != null && choice !== 'auto') {
     if (!routes.includes(choice as AIProvider)) throw new Error('This provider does not serve the selected model.');
