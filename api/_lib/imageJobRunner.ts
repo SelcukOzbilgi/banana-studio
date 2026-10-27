@@ -52,6 +52,23 @@ const observeDispatchedJob = async (db:any,job:ImageJobMessage,claim:any) => {
   if (claim.audit) await finishAudit(db,claim.audit).finish('failed',row?.metadata?.openaiRequestId);
 };
 
+const PROVIDER_TASK_WINDOW_MS = 30 * 60_000;
+const providerTaskWait = (result:any) => result?.code==='IMAGE_PROVIDER_TASK_PENDING' ? new ImageJobWait(Number(result.retryAfter)||10) : null;
+
+/** Recover a submitted provider task (Wiro) by polling its saved task ID.
+ * This path has no dispatch callback and can never submit a new request. */
+const resumeProviderTask = async (db:any,job:ImageJobMessage,claim:any) => {
+  let status=500,result:any;
+  const response={setHeader(){},status(value:number){status=value;return this;},json(value:unknown){result=value;return this;},end(){}} as unknown as VercelResponse;
+  await executeOpenAIImage({method:'POST',headers:{},body:{...claim.payload,referenceImages:claim.payload.referenceImages}} as VercelRequest,response,{
+    user:{id:job.userId},db,guard:finishAudit(db,claim.audit),resumeTask:{taskId:claim.providerTask.taskId},
+    providerDeadline:new Date(claim.dispatchedAt).getTime()+PROVIDER_TASK_WINDOW_MS,
+  });
+  const wait=providerTaskWait(result);if (wait) throw wait;
+  await rpc(db,'finish_image_job',{p_id:job.id,p_claim:claim.claim,p_success:status===200,
+    p_metadata:result?.metadata||null,p_storage_path:result?.storagePath||null,p_error:status===200?null:result?.error||'Saved image generation failed.'});
+};
+
 export const runImageJob = async (db:any,job:ImageJobMessage) => {
   if (!job || !/^[a-zA-Z0-9_-]{1,128}$/.test(job.id) || !/^[0-9a-f-]{36}$/i.test(job.userId)) return;
   if ((process.env.VERCEL_ENV && process.env.VERCEL_ENV!=='production')) throw new ImageJobWait(60);
@@ -59,7 +76,7 @@ export const runImageJob = async (db:any,job:ImageJobMessage) => {
   const claim=await rpc(db,'claim_image_job',{p_id:job.id,p_user_id:job.userId,p_claim:token});
   if (claim?.action==='stop') return;
   if (claim?.action==='wait') throw new ImageJobWait(Number(claim.retryAfter)||60);
-  if (claim?.action==='observe') return observeDispatchedJob(db,job,claim);
+  if (claim?.action==='observe') return claim.providerTask?.taskId && claim.payload ? resumeProviderTask(db,job,claim) : observeDispatchedJob(db,job,claim);
   if (claim?.action!=='prepare' || !claim.audit || !claim.payload) throw new Error('Invalid saved image claim.');
   const guard=finishAudit(db,claim.audit);
   let dispatched=false;
@@ -75,6 +92,8 @@ export const runImageJob = async (db:any,job:ImageJobMessage) => {
         dispatched=allowed===true;
         return dispatched;
       },
+      recordTask:async taskId => { await rpc(db,'record_image_job_task',{p_id:job.id,p_claim:token,p_provider:'wiro',p_task_id:taskId}); },
+      providerDeadline:Date.now()+PROVIDER_TASK_WINDOW_MS,
       deferRateLimit:async (seconds,requestId,reason) => {
         const safeRequestId=requestId && /^[a-zA-Z0-9_-]{1,128}$/.test(requestId)?requestId:null;
         const deferred=await rpc(db,'defer_refused_image_job',{p_id:job.id,p_claim:token,p_retry_after:seconds,p_request_id:safeRequestId,p_wait_reason:reason});
@@ -83,6 +102,7 @@ export const runImageJob = async (db:any,job:ImageJobMessage) => {
       },
     });
     if (rateLimitDelay || result?.code==='IMAGE_PROVIDER_RATE_STATE_UNKNOWN') throw new ImageJobWait(rateLimitDelay || Number(result.retryAfter) || 60);
+    const wait=providerTaskWait(result);if (wait) throw wait;
     await rpc(db,'finish_image_job',{p_id:job.id,p_claim:token,p_success:status===200,
       p_metadata:result?.metadata||null,p_storage_path:result?.storagePath||null,p_error:status===200?null:result?.error||'Saved image generation failed.'});
     if (!dispatched) await guard.finish('rejected');

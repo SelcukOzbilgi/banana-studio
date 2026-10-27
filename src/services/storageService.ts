@@ -661,7 +661,7 @@ const mapRowToMedia = (row: any): GeneratedMedia => {
     : undefined;
   return {
     id: row.id,
-    generationProvider: meta.generationProvider || (row.task_id?.startsWith('bs_openrouter_') ? 'openrouter' : row.task_id?.startsWith('bs_fal_') ? 'fal' : undefined), providerModel: meta.providerModel,
+    generationProvider: meta.generationProvider || (row.task_id?.startsWith('bs_openrouter_') ? 'openrouter' : row.task_id?.startsWith('bs_fal_') ? 'fal' : undefined), providerModel: meta.providerModel, providerTaskId: typeof meta.providerTaskId === 'string' ? meta.providerTaskId : undefined,
     url: resolveOriginalUrl(row),
     // Images can use the legacy derived thumbnail convention. Historical
     // video rows never created that file, so deriving one gives mobile Safari

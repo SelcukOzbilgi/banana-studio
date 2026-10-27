@@ -1,4 +1,4 @@
-import { MODEL_ROUTES } from '../../src/lib/providers.ts';
+import { modelRoutes } from '../../src/lib/providers.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID, createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -107,8 +107,9 @@ export class LocalWorkspace {
   }
   rpc(name,args,trusted) {
     if(name==='get_provider_preferences')return this.setting('providerRoutes')||{};
+    if(name==='get_wiro_models'){const saved=this.setting('wiroModels');return {models:Array.isArray(saved?.models)?saved.models:[]};}
     if(name==='save_provider_preference'){
-      if(!MODEL_ROUTES[args.p_model] || args.p_provider!=='auto'&&!MODEL_ROUTES[args.p_model].includes(args.p_provider))throw new Error('Unsupported provider choice.');
+      const routes=modelRoutes(args.p_model);if(!routes || args.p_provider!=='auto'&&!routes.includes(args.p_provider))throw new Error('Unsupported provider choice.');
       this.setting('providerRoutes',{...(this.setting('providerRoutes')||{}),[args.p_model]:args.p_provider});return true;
     }
     if(name==='get_text_model_preferences'||name==='save_text_model_preferences') {
@@ -138,13 +139,38 @@ export class LocalWorkspace {
     const job=this.job(a.p_id);if(!job)return name==='claim_image_job'?{action:'stop'}:false;
     if(name==='claim_image_job') {
       if(['completed','failed'].includes(job.state))return {action:'stop'};
-      if(job.dispatchedAt)return {action:'observe',claim:job.claim,audit:job.audit,dispatchedAt:job.dispatchedAt};
+      if(job.dispatchedAt)return {action:'observe',claim:job.claim,audit:job.audit,dispatchedAt:job.dispatchedAt,...(job.providerTask?{providerTask:job.providerTask,payload:this.materialize(job.payload)}:{})};
       if(job.state==='preparing'&&job.claimedAt>Date.now()-60_000)return {action:'wait',retryAfter:5};
       if(job.retryAt>Date.now())return {action:'wait',retryAfter:Math.ceil((job.retryAt-Date.now())/1000)};
       job.claim=a.p_claim;job.claimedAt=Date.now();job.audit=randomUUID();job.state='preparing';this.db.prepare('INSERT INTO ledger VALUES (?,?)').run(job.audit,JSON.stringify({id:job.audit,generationId:job.id,kind:'image',state:'accepted',at:Date.now()}));this.job(job.id,job);return {action:'prepare',payload:this.materialize(job.payload),audit:job.audit,claim:job.claim};
     }
     if(name==='dispatch_image_job') {if(job.claim!==a.p_claim||job.dispatchedAt)return false;job.dispatchedAt=new Date().toISOString();job.state='dispatched';this.job(job.id,job);const row=this.get('generations',job.id);if(row)this.put('generations',job.id,{...row,status:'processing',metadata:{...row.metadata,...a.p_metadata,imageJobState:'dispatched'}});return true;}
     if(name==='defer_refused_image_job') {if(job.claim!==a.p_claim)return false;job.dispatchedAt=null;job.state='queued';job.retryAt=Date.now()+Math.min(3600,Math.max(1,a.p_retry_after||60))*1000;this.job(job.id,job);return true;}
+    if(name==='record_image_job_failure') {
+      // Unexpected worker errors are counted on the durable job, so a restart
+      // cannot reset the budget. A dispatched job is never claimed for a new
+      // provider request; failing it only stops observation.
+      if(['completed','failed'].includes(job.state))return {failed:true,attempts:job.attempts||0};
+      const max=Math.min(20,Math.max(1,Number(a.p_max)||5)),reason=String(a.p_error||'Unknown error').replace(/\s+/g,' ').slice(0,200);
+      job.attempts=(job.attempts||0)+1;job.lastError=reason;
+      if(job.attempts<max){job.retryAt=Date.now()+Math.min(300_000,5_000*2**(job.attempts-1));if(job.state==='preparing')job.claimedAt=0;this.job(job.id,job);return {failed:false,attempts:job.attempts,retryAt:job.retryAt};}
+      const task=job.providerTask?.taskId?` (${job.providerTask.provider} task ${job.providerTask.taskId})`:'';
+      const message=job.dispatchedAt
+        ?`The provider request was sent${task}, but its result could not be confirmed after ${job.attempts} attempts: ${reason}. It was not resubmitted. Check provider usage before generating again.`
+        :`The image could not be prepared after ${job.attempts} attempts: ${reason}. No provider request was sent.`;
+      job.state='failed';job.failedAt=Date.now();this.job(job.id,job);
+      if(job.audit){const r=this.db.prepare('SELECT payload FROM ledger WHERE id=?').get(job.audit);if(r){const entry=JSON.parse(r.payload);if(entry.state==='accepted')this.db.prepare('UPDATE ledger SET payload=? WHERE id=?').run(JSON.stringify({...entry,state:job.dispatchedAt?'failed':'rejected'}),job.audit);}}
+      const row=this.get('generations',job.id);if(row)this.put('generations',job.id,{...row,status:'failed',metadata:{...row.metadata,error:message,imageJobState:'failed',imageJobAttempts:job.attempts}});
+      return {failed:true,attempts:job.attempts,message};
+    }
+    if(name==='record_image_job_task') {
+      // Persist the provider's task ID before polling, so a timeout or restart
+      // recovers the paid task instead of submitting another one.
+      if(job.claim!==a.p_claim||!job.dispatchedAt||typeof a.p_task_id!=='string'||!/^[a-zA-Z0-9_-]{1,128}$/.test(a.p_task_id)||a.p_provider!=='wiro')return false;
+      job.providerTask={provider:a.p_provider,taskId:a.p_task_id,at:Date.now()};this.job(job.id,job);
+      const row=this.get('generations',job.id);if(row)this.put('generations',job.id,{...row,metadata:{...row.metadata,providerTaskId:a.p_task_id,openaiRequestId:a.p_task_id}});
+      return true;
+    }
     if(name==='finish_image_job') {
       if(job.claim!==a.p_claim)return false;job.state=a.p_success?'completed':'failed';this.job(job.id,job);const row=this.get('generations',job.id);if(row)this.put('generations',job.id,{...row,status:job.state,storage_path:a.p_storage_path||row.storage_path,metadata:{...row.metadata,...a.p_metadata,...(a.p_error?{error:a.p_error}:{}),imageJobState:job.state}});return true;
     }

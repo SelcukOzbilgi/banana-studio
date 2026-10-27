@@ -2,6 +2,7 @@ import { selectProvider } from './providerRouting';
 import type { GeneratedMedia, GenerationConfig } from '../types';
 import { normalizePromptPreparation } from '../lib/prompts/promptPreparation';
 import { withoutLegacyMask } from '../lib/references/referenceImages';
+import { isWiroModelId } from '../lib/wiro/catalog';
 import { getOpenAIImageOptions, getOpenAIImageSize, getSunburstReferences, SUNBURST_MODEL, validateOpenAIImageOptions, validateOpenAIImageSize } from '../lib/images/openaiImage';
 import { supabase, getSession } from './authService';
 import { isTransientReadError } from '../lib/shared/transientRead';
@@ -149,7 +150,7 @@ export const generateOpenAIImage = async (
           body: JSON.stringify({ id, model: config.imageModel, provider: config.imageProvider, prompt, displayPrompt: config.prompt,
             originalPrompt: config.originalPrompt, promptPreparation: normalizePromptPreparation(config.promptPreparation), youtubeSource: config.youtubeSource,
             aspectRatio: config.aspectRatio, resolution: config.resolution, imagePromptCategory: config.imagePromptCategory,
-            options, referenceImages, folderId: context?.folderId }),
+            options, referenceImages, folderId: context?.folderId, ...(isWiroModelId(config.imageModel) ? { wiroOptions: config.wiroOptions || {} } : {}) }),
         });
       } catch {
         // The enqueue transaction may have committed. Reconnect to its saved ID;

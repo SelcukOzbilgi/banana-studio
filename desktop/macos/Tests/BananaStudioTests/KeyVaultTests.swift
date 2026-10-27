@@ -20,4 +20,10 @@ final class KeyVaultTests: XCTestCase {
         XCTAssertThrowsError(try KeyVault.save(.openAI, value: String(repeating: "a", count: 4096), service: service))
         XCTAssertNil(try KeyVault.read(.openAI, service: service))
     }
+    func testWiroSignatureKeysComeFirstAndStaySeparate() {
+        XCTAssertEqual(Array(ProviderKey.allCases.prefix(2)), [.wiroKey, .wiroSecret])
+        XCTAssertEqual(ProviderKey.wiroKey.rawValue, "WIRO_API_KEY")
+        XCTAssertEqual(ProviderKey.wiroSecret.rawValue, "WIRO_API_SECRET")
+        XCTAssertTrue(ProviderKey.wiroSecret.label.contains("Wiro"))
+    }
 }

@@ -8,6 +8,9 @@ import { setQueueWake } from './queue.mjs';
 import { createMediaUploader } from './uploads.mjs';
 import { createClaudeCliLocator } from './claudeCli.mjs';
 import { createClaudeStatusHandler, createClaudeTextHandler } from './claudeText.mjs';
+import { createJobLoop } from './jobLoop.mjs';
+import { createWiroCatalog } from './wiroCatalog.mjs';
+import { wiroPost } from '../../api/_lib/wiro.ts';
 import { runImageJob, ImageJobWait } from '../../api/_lib/imageJobRunner.ts';
 import openaiText from '../../api/openai-text-generate.ts';
 import openrouterText from '../../api/openrouter-text-generate.ts';
@@ -28,7 +31,7 @@ import seedanceVideo from '../../api/seedance-video.ts';
 import { chooseProvider } from '../../api/_lib/providerConfiguration.ts';
 import { seedanceProviderError } from '../../src/lib/video/seedanceProviders.ts';
 
-const KEY_NAMES=new Set(['OPENAI_API_KEY','OPENROUTER_API_KEY','GEMINI_API_KEY','YOUTUBE_API_KEY','FAL_KEY','EVOLINK_API_KEY']);
+const KEY_NAMES=new Set(['WIRO_API_KEY','WIRO_API_SECRET','OPENAI_API_KEY','OPENROUTER_API_KEY','GEMINI_API_KEY','YOUTUBE_API_KEY','FAL_KEY','EVOLINK_API_KEY']);
 const io=readline.createInterface({input:process.stdin,crlfDelay:Infinity});
 const first=await new Promise(resolve=>io.once('line',resolve));
 let launch;try{launch=JSON.parse(first);}catch{process.exit(1);}
@@ -37,18 +40,11 @@ const updateKeys=keys=>{for(const name of KEY_NAMES){delete process.env[name];co
 process.env.BANANA_RUNTIME='local';
 updateKeys(launch.keys);
 const workspace=new LocalWorkspace(launch.dataDirectory);setWorkspace(workspace);
-const active=new Set();let closing=false;
-const wake=()=>{
-  if(closing||active.size>=2)return;
-  for(const job of workspace.pendingJobs()){
-    if(active.size>=2)break;if(active.has(job.id)||job.retryAt>Date.now())continue;active.add(job.id);
-    runImageJob(workspace.client(true),{id:job.id,userId:job.userId}).catch(error=>{
-      if(error instanceof ImageJobWait){const latest=workspace.job(job.id);if(latest){latest.retryAt=Date.now()+error.afterSeconds*1000;workspace.job(job.id,latest);}}
-      // The dispatch marker is durable. A subsequent run only reconciles a
-      // dispatched request and cannot submit the same paid generation twice.
-    }).finally(()=>active.delete(job.id));
-  }
-};
+let closing=false;
+// The dispatch marker is durable. A subsequent run only reconciles a
+// dispatched request and cannot submit the same paid generation twice.
+const jobs=createJobLoop({workspace,runJob:job=>runImageJob(workspace.client(true),{id:job.id,userId:job.userId}),isWait:error=>error instanceof ImageJobWait});
+const wake=()=>{if(!closing)jobs.wake();};
 setQueueWake(wake);
 const routes={'openai-text-generate':openaiText,'openrouter-text-generate':openrouterText,'gemini-generate':geminiGenerate,'gemini-status':geminiStatus,'openai-image-generate':openaiImage,'openai-image-enqueue':openaiEnqueue,'openai-image-recover':openaiRecover,'fal-image-generate':falImage,'fal-status':falStatus,'fal-h3-video':falVideo,'fal-video-scale':falScale,'evolink-generate':evolinkGenerate,'evolink-status':evolinkStatus,'youtube':youtube,'youtube-status':youtubeStatus};
 const prepareMedia=createMediaUploader(workspace);
@@ -58,6 +54,7 @@ const claude={refresh:async()=>{const state=await claudeLocator.refresh();if(sta
 routes['claude-cli-text-generate']=createClaudeTextHandler({locator:claude});
 routes['claude-cli-status']=createClaudeStatusHandler({locator:claude,saveConfigured:value=>workspace.setting('claudeCliPath',value)});
 routes['gemini-status']=async(req,res)=>{if(req.method==='GET')await claude.refresh();return geminiStatus(req,res);};
+routes['wiro-models']=createWiroCatalog({workspace,post:(path,body)=>wiroPost(path,body)});
 routes['seedance-video']=async(req,res)=>{
  if(req.method==='POST'){
   try{
@@ -77,5 +74,5 @@ process.env.SUPABASE_URL=http.origin;
 process.stdout.write(JSON.stringify({event:'ready',origin:http.origin})+'\n');
 const timer=setInterval(wake,5_000);wake();
 io.on('line',line=>{try{const message=JSON.parse(line);if(message.action==='keys')updateKeys(message.keys);if(message.action==='shutdown')void shutdown();}catch{ /* Do not log configuration or credentials. */ }});
-const shutdown=async()=>{if(closing)return;closing=true;clearInterval(timer);await http.close();workspace.close();process.exit(0);};
+const shutdown=async()=>{if(closing)return;closing=true;jobs.close();clearInterval(timer);await http.close();workspace.close();process.exit(0);};
 io.on('close',()=>void shutdown());process.on('SIGTERM',()=>void shutdown());process.on('SIGINT',()=>void shutdown());
