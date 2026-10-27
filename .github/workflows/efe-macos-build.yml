@@ -1,6 +1,9 @@
 name: Fork macOS build (arm64, development)
 on:
   workflow_dispatch:
+  # Dispatch only works once this file is on main; PRs get a build too.
+  pull_request:
+    branches: [main]
   push:
     tags: ['efe-v*']
 permissions:
