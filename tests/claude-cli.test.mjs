@@ -38,6 +38,8 @@ const makeFake = (home = fs.mkdtempSync(path.join(os.tmpdir(), 'banana-fake-clau
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const waitFor = async (check, ms = 5_000) => { const end = Date.now() + ms; while (!check()) { if (Date.now() > end) return false; await new Promise(r => setTimeout(r, 25)); } return true; };
 const prompt = text => buildClaudeCliInput([{ text }]);
+// The fake CLI is a POSIX shebang script; Claude (abonelik) is a Mac-only provider.
+const POSIX_ONLY = { skip: process.platform === 'win32' && 'fake CLI needs a POSIX shebang' };
 const ARGS = buildClaudeCliArgs({ model: 'anthropic/claude-opus-5.5', effort: 'medium', system: 'System.' });
 
 test('arguments: print mode, stream JSON, mapped model/effort, no tools, MCP, hooks or saved session; prompt stays out of argv', () => {
@@ -88,7 +90,7 @@ test('result parsing: structured output, login, usage limit, API-key billing and
   assert.match(interpretClaudeCliResult({ is_error: true, result: 'Overloaded' }).message, /Overloaded/);
 });
 
-test('fake CLI run: prompt via stdin, empty private working directory removed afterwards, minimal env', async () => {
+test('fake CLI run: prompt via stdin, empty private working directory removed afterwards, minimal env', POSIX_ONLY, async () => {
   const fake = makeFake();
   try {
     process.env.OPENROUTER_API_KEY = 'sk-or-not-forwarded';
@@ -102,7 +104,7 @@ test('fake CLI run: prompt via stdin, empty private working directory removed af
   } finally { delete process.env.OPENROUTER_API_KEY; fake.cleanup(); }
 });
 
-test('fake CLI errors: login, usage limit, crash with stderr, missing binary', async () => {
+test('fake CLI errors: login, usage limit, crash with stderr, missing binary', POSIX_ONLY, async () => {
   const fake = makeFake();
   try {
     const run = mode => runClaudeCli({ cliPath: fake.cli, args: ARGS, input: prompt(`MODE:${mode}`), home: fake.home }).then(() => 'ok', error => error);
@@ -114,7 +116,7 @@ test('fake CLI errors: login, usage limit, crash with stderr, missing binary', a
   } finally { fake.cleanup(); }
 });
 
-test('timeout, caller abort, output overflow and API-key login kill the child', async () => {
+test('timeout, caller abort, output overflow and API-key login kill the child', POSIX_ONLY, async () => {
   const fake = makeFake();
   try {
     const timeout = await runClaudeCli({ cliPath: fake.cli, args: ARGS, input: prompt('MODE:hang'), timeoutMs: 400, killGraceMs: 200, home: fake.home }).catch(error => error);
@@ -134,7 +136,7 @@ test('timeout, caller abort, output overflow and API-key login kill the child', 
   } finally { fake.cleanup(); }
 });
 
-test('discovery: common locations, verified version, explicit path is authoritative', async () => {
+test('discovery: common locations, verified version, explicit path is authoritative', POSIX_ONLY, async () => {
   const fake = makeFake();
   try {
     assert.ok(claudeCliCandidates({ home: '/Users/example' }).includes('/opt/homebrew/bin/claude'));
@@ -166,7 +168,7 @@ const call = async (handler, body, { accept = 'application/x-ndjson', method = '
 };
 const textBody = (extra = {}) => ({ model: 'anthropic/claude-opus-5.5', reasoningEffort: 'medium', contents: { parts: [{ text: 'Brief MODE:ok' }] }, usageContext: { action: 'enhance', prompt: 'Brief' }, ...extra });
 
-test('desktop route keeps the existing text contract, records zero-cost usage and maps errors', async () => {
+test('desktop route keeps the existing text contract, records zero-cost usage and maps errors', POSIX_ONLY, async () => {
   const fake = makeFake(), directory = fs.mkdtempSync(path.join(os.tmpdir(), 'banana-claude-ws-'));
   const store = new LocalWorkspace(directory); setWorkspace(store);
   try {
