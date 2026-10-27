@@ -1,4 +1,5 @@
 import { signMacRelease } from './sign-macos-release.mjs';
+import { assertForkUpdateChannel, feedUrl } from './fork-identity.mjs';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -39,6 +40,7 @@ const iconset=path.join(root,'.build/BananaStudio.iconset');fs.mkdirSync(iconset
 }
 execFileSync('/usr/bin/iconutil',['-c','icns',iconset,'-o',path.join(resources,'BananaStudio.icns')]);
 const publicKey=fs.readFileSync(path.join(root,'desktop/macos/Resources/SparklePublicKey.txt'),'utf8').trim();if(Buffer.from(publicKey,'base64').length!==32)throw new Error('A valid Sparkle public key is required.');
+assertForkUpdateChannel({development,publicKey});
 fs.writeFileSync(path.join(contents,'Info.plist'),`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -48,7 +50,7 @@ fs.writeFileSync(path.join(contents,'Info.plist'),`<?xml version="1.0" encoding=
 <key>CFBundleShortVersionString</key><string>${version}</string><key>CFBundleVersion</key><string>${build}</string>
 <key>CFBundleIconFile</key><string>BananaStudio</string><key>LSMinimumSystemVersion</key><string>13.5</string><key>LSMultipleInstancesProhibited</key><true/>
 <key>NSHighResolutionCapable</key><true/><key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
-<key>SUFeedURL</key><string>https://github.com/orkunisitmak/banana-studio/releases/latest/download/appcast-${process.arch}.xml</string>
+<key>SUFeedURL</key><string>${feedUrl(process.arch)}</string>
 <key>SUPublicEDKey</key><string>${publicKey}</string><key>SUSendProfileInfo</key><false/>
 <key>SUEnableAutomaticChecks</key><${development?'false':'true'}/><key>SUAutomaticallyUpdate</key><true/>
 <key>SUVerifyUpdateBeforeExtraction</key><true/><key>SURequireSignedFeed</key><true/>
