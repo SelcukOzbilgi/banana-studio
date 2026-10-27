@@ -18,6 +18,7 @@ Upstream `orkunisitmak/banana-studio` (MIT) üzerinden kişisel Mac uygulaması.
 
 ## Kurallar
 
+- Upstream zaten iyi çalışıyor: önce upstream'in özelliklerini kullan; fork değişikliklerini eklemeli ve en küçük tut ki `git merge upstream/main` kolay kalsın. Ekstralar sonra.
 - Yalnız Mac masaüstü hedef; web/Supabase/Vercel tarafına gerekmedikçe dokunma.
 - Bilinen hatalar Wiro yolunu etkiliyorsa önce onları düzelt (REVIEW.md "Mac fork için öncelik sırası").
 - Anahtarlar Keychain'de; koda, loga, commit'e girmez. Claude OAuth token'ı CLI dışına çıkarılmaz.
