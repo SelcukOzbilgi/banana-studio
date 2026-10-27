@@ -247,7 +247,7 @@ test('catalog route signs server-side, lists image models, stores server-built c
   const call=async(method,body)=>{let status=0,result;const res={status(v){status=v;return this;},json(v){result=v;return this;}};await route({method,body},res);return {status,result};};
   try{
     let {result}=await call('GET');
-    assert.deepEqual(result.models.map(m=>m.appModel),['gpt-image-2.5-sunburst','gemini-nano-banana-2.1','gemini-3-pro-image-preview']);assert.equal(result.configured,true);
+    assert.deepEqual(result.models.map(m=>m.appModel),['gemini-3-pro-image-preview','gemini-nano-banana-2.1','gpt-image-2.5-sunburst'],'defaults keep the existing picker order');assert.equal(result.configured,true);
     ({result}=await call('POST',{action:'search',query:'flux'}));
     assert.deepEqual(result.results.map(r=>r.slug),['black-forest-labs/flux-2-pro']);assert.equal(result.results[0].priceSummary,'$0.03 per image');
     assert.deepEqual(calls[0][1].categories,['text-to-image','image-to-image','image-editing']);
@@ -262,3 +262,21 @@ test('catalog route signs server-side, lists image models, stores server-built c
     delete process.env.WIRO_API_SECRET;assert.equal((await call('POST',{action:'search'})).status,400);
   }finally{store.close();fs.rmSync(dir,{recursive:true,force:true});}
 }));
+
+test('picker shows the saved Wiro selection with existing labels; the price label uses Wiro list prices',async()=>{
+  const out=path.join(outdir,`wiro-ui-${process.pid}.mjs`);
+  await build({entryPoints:[path.join(root,'src/components/WiroModelSettings.tsx')],outfile:out,bundle:true,format:'esm',platform:'node',target:'node22',jsx:'automatic',logLevel:'silent',packages:'external'});
+  try{
+    const ui=await import(pathToFileURL(out).href);
+    const sunburstPrices=[{inputs:{quality:'low',resolution:'1k',ratio:'1:1'},price:0.006,method:'cpr'}];
+    const models=[{slug:'google/nano-banana-pro',appModel:'gemini-3-pro-image-preview',builtin:true,title:'Nano Banana Pro (Google)',prices:[],controls:null},
+      {slug:'openai/gpt-image-2-5-sunburst',appModel:'gpt-image-2.5-sunburst',builtin:true,title:'GPT Image 2.5 Sunburst (OpenAI)',prices:sunburstPrices,controls:null},
+      {slug:'black-forest-labs/flux-2-pro',appModel:'wiro:black-forest-labs/flux-2-pro',builtin:false,title:'FLUX.2 Pro',prices:[{inputs:{},price:0.03,method:'cpr'}],controls:mapWiroSchema(NANO).controls}];
+    assert.deepEqual(ui.wiroImageModelOptions(undefined,'gpt-image-2.5-sunburst').map(o=>o.label),['Nano Banana Pro','Nano Banana 2.1','GPT Image 2.5'],'without the desktop selection the picker is unchanged');
+    assert.deepEqual(ui.wiroImageModelOptions(models,'gpt-image-2.5-sunburst').map(o=>[o.value,o.label]),[['gemini-3-pro-image-preview','Nano Banana Pro'],['gpt-image-2.5-sunburst','GPT Image 2.5'],['wiro:black-forest-labs/flux-2-pro','FLUX.2 Pro']]);
+    const config={imageModel:'gpt-image-2.5-sunburst',resolution:'1K',aspectRatio:'1:1',openaiImageOptions:{quality:'low'}};
+    assert.equal(ui.wiroCostLabel(config,models[1],1).label,'~$0.006 · Wiro');
+    assert.equal(ui.wiroCostLabel({...config,openaiImageOptions:{quality:'max'}},models[1],1).label,'Wiro · billed at finish');
+    assert.equal(ui.wiroCostLabel({imageModel:'wiro:black-forest-labs/flux-2-pro',wiroOptions:{}},models[2],2).label,'~$0.060 · Wiro');
+  }finally{fs.rmSync(out,{force:true});}
+});

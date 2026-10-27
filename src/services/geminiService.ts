@@ -9,6 +9,7 @@ import { getGeminiClient, getOpenAITextClient, Modality, ThinkingLevel, type Tex
 import { createTaskDeadline, waitForTask } from '../lib/shared/asyncTask';
 import { compressBase64Image } from "./imageCompression";
 import { generateOpenAIImage, type ImageGenerationContext } from "./openaiImageService";
+import { isWiroModelId } from '../lib/wiro/catalog';
 import { getSunburstReferences, SUNBURST_MODEL } from "../lib/images/openaiImage";
 import { assembleSunburstBrainstormIdea, buildReferenceGenerationRule, buildSunburstGuidance, prepareImagePromptResult, buildYouTubeCameraGazeRule, buildYouTubeWardrobeRule, buildYouTubeEditorialRule, buildYouTubeStyleReferenceRule, describeSunburstReference, getSunburstEditIntent, isYouTubeChannelBannerPrompt, isYouTubeThumbnailPrompt, normalizeSunburstPrompt, preserveSunburstEditBrief, preserveSunburstSourceBrief, preserveSunburstThumbnailBrief, stripLegacyOutputCanvas, type ImagePromptSettings } from "../lib/images/imagePrompting";
 import { logUsage } from "./authService";
@@ -50,7 +51,7 @@ This language rule applies to production instructions only. Preserve exact visib
 Return only the requested prompt or JSON, without a translation explanation or a second copy in the input language. Do not add new scene content or expand an edit beyond the selected area to translate it.`;
 
 const isSupportedImageModel = (model: unknown): model is ImageModelId => {
-  return model === 'gemini-3-pro-image-preview'
+  return isWiroModelId(model) || model === 'gemini-3-pro-image-preview'
     || model === 'gemini-3.1-flash-image-preview'
     || model === 'gemini-nano-banana-2.1'
     || model === SUNBURST_MODEL;

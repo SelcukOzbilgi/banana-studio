@@ -9,6 +9,8 @@ import { SavedPeople } from './SavedPeople';
 import { addSavedPersonToDraft, findPersonMentions, getPersonDefinitions, getPersonGroups, getPersonId, getPersonTag } from '../lib/references/personReferences';
 import { getImageCostPreview, type ImageCostSample } from '../lib/images/imageCostPreview';
 import { Dropdown } from './ControlDropdown';
+import { useWiroModels, wiroImageModelOptions, WiroImageControls, wiroCostLabel } from './WiroModelSettings';
+import { isWiroModelId } from '../lib/wiro/catalog';
 import { ImageCountControl, PROMPT_PANEL_CLASS, PROMPT_INPUT_CLASS, PROMPT_TEXTAREA_CLASS, PROMPT_TOOLBAR_CLASS, PROMPT_SETTINGS_CLASS, PROMPT_ACTIONS_CLASS, PROMPT_REVERT_CLASS, promptResizeClass, promptEnhanceClass, promptGenerateClass } from './PromptComposerUI';
 import { OpenAIImageSettings } from './OpenAIImageSettings';
 import { H3MaxDuration, H3MaxSettings, getH3MaxImageLabel, getH3MaxInputError, getH3MaxUIState } from './H3MaxSettings';
@@ -591,10 +593,13 @@ export const Controls: React.FC<ControlsProps> = ({
     && currentReferenceAudios.length === 0
     && (config.referenceImages || []).length > 0
     && (config.referenceImages || []).some(image => image.isFirstFrame || image.isLastFrame);
+  const wiroModels = useWiroModels();
+  const wiroModel = wiroModels?.models.find(model => model.appModel === config.imageModel);
   const maxReferenceImages = isH3VideoConfig
     ? h3State.imageLimit
     : config.mode === 'video' && config.videoModel === 'seedance-2.5'
       ? (seedanceFrameOnly ? 2 : 30)
+      : config.mode === 'image' && isWiroModelId(config.imageModel) ? wiroModel?.controls?.images?.max ?? 0
       : config.mode === 'image' && config.imageModel === SUNBURST_MODEL ? 16 : 14;
   const hasStaleEnhancedPrompt = h3PromptSupported && isEnhancedPromptStale(config);
 
@@ -1757,7 +1762,7 @@ export const Controls: React.FC<ControlsProps> = ({
 
   // --- Render Helpers ---
 
-  const imageModelOptions = IMAGE_MODEL_OPTIONS;
+  const imageModelOptions = wiroImageModelOptions(wiroModels?.models, config.imageModel);
   const selectedVideoModel = config.videoModel || DEFAULT_VIDEO_MODEL;
   const providerRoute = useProviderRoute(config.mode === 'video' ? selectedVideoModel : config.imageModel);
   const selectedVideoOperation = config.videoOperation || 'generate';
@@ -1888,7 +1893,8 @@ export const Controls: React.FC<ControlsProps> = ({
       : config.referenceImages.some(ref => ref.isEditSource && ref.editRegion) ? 'Only the masked area changes.' : 'Sizes auto-adjust when you finish editing.'
     : undefined;
   const hasComposerMessages = true; // Provider selection remains visible even when there are no validation messages.
-  const imageCostPreview = getImageCostPreview({ ...config, imageProvider: providerRoute.provider }, config.count, imageCostHistory);
+  const wiroCost = !isVideoMode && providerRoute.provider === 'wiro' ? wiroCostLabel(config, wiroModel, config.count) : null;
+  const imageCostPreview = { ...getImageCostPreview({ ...config, imageProvider: providerRoute.provider }, config.count, imageCostHistory), ...wiroCost };
   const imageCostLabel = imageCostPreview.label;
   const brainstormImageCount = brainstormIdeaCount * config.count;
   const brainstormCostPreview = getImageCostPreview({ ...config, imageProvider: providerRoute.provider }, brainstormImageCount, imageCostHistory);
@@ -2862,7 +2868,7 @@ export const Controls: React.FC<ControlsProps> = ({
                 ) : (
                   <>
                     <Dropdown label="Model" value={config.imageModel} options={imageModelOptions} onSelect={(val) => updateConfig('imageModel', val)} icon={ImageIcon} compact />
-                    {isSunburst ? <OpenAIImageSettings config={config} onChange={onChange} onSizeAdjustment={setSizeAdjustment} /> : <>
+                    {isWiroModelId(config.imageModel) ? <WiroImageControls config={config} model={wiroModel} onChange={onChange} /> : isSunburst ? <OpenAIImageSettings config={config} onChange={onChange} onSizeAdjustment={setSizeAdjustment} /> : <>
                       <Dropdown label="Aspect Ratio" value={config.aspectRatio} options={aspectRatioOptions} onSelect={(val) => updateConfig('aspectRatio', val)} icon={Ratio} compact />
                       <Dropdown label="Resolution" value={config.resolution} options={resolutionOptions} onSelect={(val) => updateConfig('resolution', val)} icon={Scan} compact />
                     </>}

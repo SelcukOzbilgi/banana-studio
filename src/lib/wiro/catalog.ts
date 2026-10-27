@@ -3,9 +3,9 @@
 
 /** App image models that Wiro serves directly (verified with Tool/Detail on 2026-10-27). */
 export const WIRO_BUILTIN_MODELS: Record<string, string> = {
-  'gpt-image-2.5-sunburst': 'openai/gpt-image-2-5-sunburst',
-  'gemini-nano-banana-2.1': 'google/nano-banana-2-1',
   'gemini-3-pro-image-preview': 'google/nano-banana-pro',
+  'gemini-nano-banana-2.1': 'google/nano-banana-2-1',
+  'gpt-image-2.5-sunburst': 'openai/gpt-image-2-5-sunburst',
 };
 /** Exact canvas sizes and protected edits use the width/height variant (480–3840 px). */
 export const WIRO_SUNBURST_CUSTOM = 'openai/gpt-image-2-5-sunburst-custom';

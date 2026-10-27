@@ -3154,6 +3154,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                 <p className="text-[10px] font-bold uppercase text-gray-500">Provider</p>
                 <p className="mt-1 text-sm text-white">{PROVIDER_LABELS[selectedMedia.generationProvider]}</p>
                 {selectedMedia.providerModel && <p className="mt-1 break-all text-xs text-gray-500">{selectedMedia.providerModel}</p>}
+                {selectedMedia.providerTaskId && <p className="mt-1 break-all text-xs text-gray-500">{PROVIDER_LABELS[selectedMedia.generationProvider]} task {selectedMedia.providerTaskId}</p>}
               </div>}
               {/* Metadata Grid */}
               {selectedMedia.mediaType === 'video' ? (
@@ -3289,7 +3290,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                 </div>
                 <div className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/30">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase">{selectedMedia.generationCost?.source === 'provider_usage' ? 'Usage Cost' : 'Est. Cost'}</span>
+                    <span className="text-[10px] font-bold text-gray-500 uppercase">{selectedMedia.generationCost?.source === 'provider_usage' ? 'Usage Cost' : selectedMedia.generationCost?.source === 'provider_actual' ? 'Actual Cost' : 'Est. Cost'}</span>
                   </div>
                   <span className="text-sm font-semibold text-green-400">
                     {selectedMedia.generationCost ? `$${selectedMedia.generationCost.usd.toFixed(4)}` : ['gpt-image-2.5-sunburst','gemini-nano-banana-2.1'].includes(selectedMedia.imageModel || '') || selectedMedia.generationProvider ? 'Unavailable' : `~$${estimateImageCost(

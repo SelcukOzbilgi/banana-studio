@@ -1,10 +1,11 @@
 import { getImagePromptContextKey, isImagePromptContextCurrent, SUNBURST_MODEL } from './lib/images/openaiImage.ts';
 import { resolveH3MaxMode, type H3MaxMode, type H3MaxOptions, type H3MaxSelection } from './lib/video/h3Max.ts';
+import { isWiroModelId, type WiroImageOptions } from './lib/wiro/catalog.ts';
 export type { H3MaxMode, H3MaxOptions, H3MaxSelection } from './lib/video/h3Max.js';
 export type AspectRatio = '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
 export type Resolution = '1K' | '2K' | '4K';
 /** Retired model IDs remain readable in historical gallery rows. */
-export type ImageModelId = 'gemini-3-pro-image-preview' | 'gemini-nano-banana-2.1' | 'gemini-3.1-flash-image-preview' | 'gpt-image-2-beta' | 'gpt-image-2.5-sunburst';
+export type ImageModelId = 'gemini-3-pro-image-preview' | 'gemini-nano-banana-2.1' | 'gemini-3.1-flash-image-preview' | 'gpt-image-2-beta' | 'gpt-image-2.5-sunburst' | `wiro:${string}`;
 export interface OpenAIImageOptions {
   quality: 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   size: 'preset' | 'auto' | 'custom';
@@ -45,12 +46,14 @@ export const IMAGE_MODEL_OPTIONS: { label: string; value: ImageModelId }[] = [
 export const getActiveImageModel = (value: unknown): ImageModelId => {
   if (value === 'gemini-3.1-flash-image-preview') return 'gemini-nano-banana-2.1';
   if (value === 'gpt-image-2-beta') return SUNBURST_MODEL;
+  if (isWiroModelId(value)) return value;
   return IMAGE_MODEL_OPTIONS.some(option => option.value === value) ? value as ImageModelId : DEFAULT_IMAGE_MODEL;
 };
 export const getImageModelLabel = (value?: string): string => {
   if (value === 'gemini-3.1-flash-image-preview') return 'Nano Banana 2';
   if (value === 'gpt-image-2-beta') return 'GPT Image 2 (retired)';
   const model = value || DEFAULT_IMAGE_MODEL;
+  if (isWiroModelId(model)) return `${model.split('/')[1]} · Wiro`;
   return IMAGE_MODEL_OPTIONS.find(option => option.value === model)?.label || model;
 };
 
@@ -476,6 +479,8 @@ export interface GenerationConfig {
   resolution: Resolution;
   imageModel: ImageModelId;
   openaiImageOptions?: OpenAIImageOptions;
+  /** Ratio/resolution/quality for Wiro catalog models (`wiro:` IDs). */
+  wiroOptions?: WiroImageOptions;
   imagePromptCategory?: BrainstormCategory;
   referenceImages: ReferenceImage[];
   /** Draft/template identities, including people with no assigned photo yet. */
@@ -557,6 +562,8 @@ export const isEnhancedPromptStale = (config: GenerationConfig): boolean => Bool
 export interface GeneratedMedia {
   generationProvider?: import('./lib/providers.js').AIProvider;
   providerModel?: string;
+  /** Wiro task ID, kept to check usage or recover the result. */
+  providerTaskId?: string;
   id: string;
   url: string;
   thumbnailUrl?: string;
