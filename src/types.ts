@@ -484,6 +484,10 @@ export interface GenerationConfig {
   /** Ratio/resolution/quality for Wiro catalog models (`wiro:` IDs). */
   wiroOptions?: WiroImageOptions;
   imagePromptCategory?: BrainstormCategory;
+  /** Fork: Brainstorm "Product" presentation mode; 'standard' adds nothing. */
+  productShotMode?: import('./lib/prompts/productShotModes.js').ProductShotMode;
+  /** Fork: style lock of the target folder, attached at submission time. */
+  styleLock?: import('./lib/styleLock/styleLock.js').StyleLock;
   referenceImages: ReferenceImage[];
   /** Draft/template identities, including people with no assigned photo yet. */
   personGroups?: PersonGroupDefinition[];
@@ -566,6 +570,8 @@ export interface GeneratedMedia {
   providerModel?: string;
   /** Wiro task ID, kept to check usage or recover the result. */
   providerTaskId?: string;
+  /** Fork: name of the folder whose style lock was applied to this generation. */
+  styleLockFolder?: string;
   id: string;
   url: string;
   thumbnailUrl?: string;

@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, requireUser } from './_lib/auth.js';
+import { apifyYouTube, ApifyError } from './_lib/apifyYouTube.js';
 
 const YOUTUBE_API_BASE = 'https://www.googleapis.com/youtube/v3';
 
@@ -17,6 +18,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const user = await requireUser(req, res);
   if (!user) return;
+
+  // Fork: an Apify token takes over YouTube lookups; without it the Google key path is unchanged.
+  const apifyToken = process.env.APIFY_TOKEN?.trim();
+  if (apifyToken) {
+    let request: YoutubeProxyRequest;
+    try { request = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; } catch { return res.status(400).json({ error: 'Invalid JSON body' }); }
+    if (!request?.endpoint || !ALLOWED_ENDPOINTS.has(request.endpoint)) return res.status(400).json({ error: `Unsupported endpoint: ${request?.endpoint}` });
+    const params = Object.fromEntries(Object.entries(request.params && typeof request.params === 'object' ? request.params : {}).filter(([, value]) => typeof value === 'string')) as Record<string, string>;
+    try { return res.status(200).json(await apifyYouTube(request.endpoint, params, apifyToken)); }
+    catch (error) {
+      if (error instanceof ApifyError) return res.status(error.status).json({ error: error.message });
+      // The token is only in a request header, never in an error message.
+      console.error('Apify YouTube lookup failed:', (error as Error)?.message || 'unknown error');
+      return res.status(502).json({ error: 'Apify YouTube lookup failed.' });
+    }
+  }
 
   const apiKey = process.env.YOUTUBE_API_KEY;
   if (!apiKey) {

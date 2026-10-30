@@ -20,6 +20,12 @@ export function createMediaUploader(workspace,{fetchImpl=fetch,falUpload}={}) {
       if(!['image/png','image/jpeg','image/webp'].includes(type)||stat.size>20*1024*1024)throw new ReferenceUploadError('OpenRouter frame/reference images must be PNG, JPEG or WebP, up to 20 MB.');
       return `data:${type};base64,${fs.readFileSync(file).toString('base64')}`;
     }
+    // Fork: Wiro reads files from the multipart Run body; nothing is uploaded ahead of the paid call.
+    if(provider==='wiro') {
+      const image=['image/png','image/jpeg','image/webp'].includes(type),audio=['audio/mpeg','audio/wav'].includes(type);
+      if((!image&&!audio)||stat.size>(image?20:15)*1024*1024)throw new ReferenceUploadError('Wiro video references must be PNG, JPEG or WebP images up to 20 MB, or MP3/WAV audio up to 15 MB.');
+      return `data:${type};base64,${fs.readFileSync(file).toString('base64')}`;
+    }
     const token=process.env[keyName(provider)];if(!token)throw new Error(`Add your ${provider==='fal'?'fal.ai':'EvoLink'} key in Provider keys before using this reference.`);
     const limit=provider==='fal'?512*1024*1024:100*1024*1024;if(stat.size>limit)throw new Error(`The reference exceeds the ${Math.round(limit/1024/1024)} MB provider upload limit.`);
     const cacheKey=[provider,key,stat.mtimeMs,stat.size].join(':');const cached=cache.get(cacheKey);if(cached&&cached.expires>Date.now())return cached.promise;

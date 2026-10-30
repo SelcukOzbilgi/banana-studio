@@ -2,6 +2,8 @@ import { flattenPreparedImageBrief } from '../lib/prompts/promptHistory';
 import { describeEditRegionPercent } from '../lib/images/imageEditRegion';
 import { buildBrainstormWardrobeGuidance, buildConceptWardrobeGuidance, completeConceptWardrobe, parseBrainstormWardrobe, preserveConceptWardrobe, requestsFixedWardrobeAcrossIdeas } from '../lib/brainstorm/brainstormWardrobe';
 import { applyYouTubeCameraGaze, preserveYouTubeCameraGaze, stripYouTubeCameraGaze } from '../lib/youtube/youtubeCameraGaze';
+import { buildForkTextGuidance } from '../lib/prompts/forkGuidance';
+import { getActiveStyleLock } from './styleLockService';
 import { buildEditableReferenceGuidance, prepareEditableImagePrompt } from '../lib/references/dynamicReferences';
 import { getPersonId, getPersonGroups, buildPersonIdentityContract, buildPersonSeparationRule, normalizeReferencePrompt } from '../lib/references/personReferences';
 import { GeneratedMedia, GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, BrainstormCategory, BrainstormIdea, DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL, getActiveImageModel, ImageModelId, VideoModelId, VideoOperation } from "../types";
@@ -250,7 +252,9 @@ const runImagePromptTask = async (
     .filter(Boolean)
     .join('\n\n');
   const brief = [prompt, customInstructions].filter(Boolean).join('\n\n');
-  const guidance = buildSunburstGuidance(task, references, settings, category, count, brief);
+  const guidance = [buildSunburstGuidance(task, references, settings, category, count, brief),
+    buildForkTextGuidance({ task, category, brief, originalPrompt: settings.originalPrompt, aspectRatio: settings.aspectRatio, settings: { ...settings, styleLock: 'styleLock' in settings ? settings.styleLock : getActiveStyleLock() },
+      edit: !!getSunburstEditIntent(prompt, references, settings), youtube: category === 'youtube_thumbnail' || isYouTubeThumbnailPrompt(brief, references, settings) })].filter(Boolean).join('\n\n');
   const wardrobeRequired = task === 'brainstorm' && needsBrainstormWardrobe(brief, references, settings, category, count);
   const parts: any[] = [{ text: wardrobeRequired
     ? buildBrainstormWardrobeGuidance(guidance, references, count) : guidance }];
@@ -1197,7 +1201,9 @@ Each idea should be distinctly different from the others.
 Return ONLY a valid JSON array of exactly ${normalizedIdeaCount} strings. Each string is one complete, detailed narrative prompt.
 Format: ["Detailed narrative prompt 1...", "Detailed narrative prompt 2...", ...]`;
 
-  const guidance = [fullPrompt, buildYouTubeWardrobeRule(userBrief || '', referenceImages, { imagePromptCategory: category }), cameraGaze].filter(Boolean).join('\n\n');
+  const guidance = [fullPrompt, buildYouTubeWardrobeRule(userBrief || '', referenceImages, { imagePromptCategory: category }), cameraGaze,
+    buildForkTextGuidance({ task: 'brainstorm', category, brief: combinedBrief, aspectRatio: targetSettings.aspectRatio, settings: { ...targetSettings, styleLock: targetSettings.styleLock ?? getActiveStyleLock() },
+      edit: !!getSunburstEditIntent(combinedBrief, referenceImages, targetSettings), youtube: false })].filter(Boolean).join('\n\n');
   parts.push({ text: wardrobeRequired ? buildBrainstormWardrobeGuidance(guidance, referenceImages, normalizedIdeaCount) : guidance });
 
   try {

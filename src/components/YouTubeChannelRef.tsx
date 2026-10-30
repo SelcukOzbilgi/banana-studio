@@ -105,13 +105,14 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
   });
   const [configured, setConfigured] = useState<boolean>(true);
 
+  // Fork: re-checked on open so a key added at runtime also refreshes the lookup source and its deadline.
   useEffect(() => {
     let cancelled = false;
     isYouTubeConfigured().then((ok) => {
       if (!cancelled) setConfigured(ok);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -442,9 +443,10 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
             {!configured ? (
               <div className="p-6 text-center">
                 <AlertCircle className="w-8 h-8 text-gray-600 mx-auto mb-2" />
-                <p className="text-sm text-gray-400">YouTube API key not configured</p>
+                <p className="text-sm text-gray-400">YouTube data source not configured</p>
                 <p className="text-xs text-gray-600 mt-1">
-                  Set <code className="text-violet-400">YOUTUBE_API_KEY</code> in your server environment
+                  {/* Fork: Apify token first, Google key as fallback. */}
+                  Add <code className="text-violet-400">YouTube · Apify</code> (Apify token) or a <code className="text-violet-400">YOUTUBE_API_KEY</code> in Provider keys
                 </p>
               </div>
             ) : (

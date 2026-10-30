@@ -7,9 +7,10 @@ import { isReferenceUrl } from './_lib/providerMedia.js';
 import { prepareTaskRegistry, registerProviderTask, requireProviderTask } from './_lib/providerTasks.js';
 import evolinkGenerate from './evolink-generate.js';
 import { signedMediaUrl } from './_lib/imageStorage.js';
+import { handleWiroSeedanceGet, handleWiroSeedancePost } from './_lib/wiroVideo.js';
 
 export const config = { maxDuration: 300 };
-const HANDLE = /^bs_(fal|openrouter)_(seedance-2\.[05])_([a-zA-Z0-9_-]{1,128})$/;
+const HANDLE = /^bs_(fal|openrouter|wiro)_(seedance-2\.[05])_([a-zA-Z0-9_-]{1,128})$/;
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   applyCors(res); res.setHeader('Cache-Control','no-store');
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -24,6 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const error = seedanceProviderError(provider, body);
       if (error) return res.status(400).json({ error });
       if (provider === 'evolink') return evolinkGenerate(req,res);
+      if (provider === 'wiro') return handleWiroSeedancePost(req,res,body,user.id);
       if (provider !== 'fal' && provider !== 'openrouter') return res.status(400).json({ error: 'Unsupported video provider.' });
       if (typeof body.prompt !== 'string' || !body.prompt.trim() || body.prompt.length > 20000) return res.status(400).json({ error: 'Enter a prompt up to 20,000 characters.' });
       for (const field of ['imageUrls','videoUrls','audioUrls']) {
@@ -47,6 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const match = typeof taskId === 'string' && taskId.match(HANDLE);
     if (!match) return res.status(400).json({ error: 'Invalid video task.' });
     const [,provider,model,id] = match;
+    if (provider === 'wiro') return handleWiroSeedanceGet(req,res,taskId,id,user.id);
     if (!await requireProviderTask(req,res,provider as 'fal' | 'openrouter',taskId)) return;
     const key = process.env[provider === 'fal' ? 'FAL_KEY' : 'OPENROUTER_API_KEY'];
     if (!key) return res.status(503).json({ error: 'Restore the original provider key to recover this video.', retryable: true });

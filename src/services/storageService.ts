@@ -661,7 +661,8 @@ const mapRowToMedia = (row: any): GeneratedMedia => {
     : undefined;
   return {
     id: row.id,
-    generationProvider: meta.generationProvider || (row.task_id?.startsWith('bs_openrouter_') ? 'openrouter' : row.task_id?.startsWith('bs_fal_') ? 'fal' : undefined), providerModel: meta.providerModel, providerTaskId: typeof meta.providerTaskId === 'string' ? meta.providerTaskId : undefined,
+    generationProvider: meta.generationProvider || (row.task_id?.startsWith('bs_wiro_') ? 'wiro' : row.task_id?.startsWith('bs_openrouter_') ? 'openrouter' : row.task_id?.startsWith('bs_fal_') ? 'fal' : undefined), providerModel: meta.providerModel, providerTaskId: typeof meta.providerTaskId === 'string' ? meta.providerTaskId : undefined,
+    styleLockFolder: typeof meta.styleLock?.folderName === 'string' ? meta.styleLock.folderName : undefined,
     url: resolveOriginalUrl(row),
     // Images can use the legacy derived thumbnail convention. Historical
     // video rows never created that file, so deriving one gives mobile Safari
@@ -1359,7 +1360,7 @@ export const saveVideo = async (
       referenceVideos: finalReferenceVideos.length > 0 ? finalReferenceVideos.map(ref => ({ ...ref, url: persistMediaReference(ref.url) })) : undefined,
       referenceAudios: finalReferenceAudios.length > 0 ? finalReferenceAudios.map(ref => ({ ...ref, url: persistMediaReference(ref.url) })) : undefined,
       providerModel: media.providerModel || media.falEndpoint,
-      generationProvider: media.generationProvider || (media.taskId?.startsWith('bs_openrouter_') ? 'openrouter' : media.taskId?.startsWith('bs_fal_') ? 'fal' : undefined),
+      generationProvider: media.generationProvider || (media.taskId?.startsWith('bs_wiro_') ? 'wiro' : media.taskId?.startsWith('bs_openrouter_') ? 'openrouter' : media.taskId?.startsWith('bs_fal_') ? 'fal' : undefined),
       falEndpoint: media.falEndpoint,
       falQueueEndpoint: media.falQueueEndpoint,
     };
@@ -1642,8 +1643,8 @@ export const updateVideoStatus = async (
   id: string,
   status: 'processing' | 'completed' | 'failed',
   updates?: { url?: string; metadata?: any; referenceImages?: GeneratedMedia['referenceImages'] }
-): Promise<void> => {
-  if (!supabase) return;
+): Promise<boolean> => {
+  if (!supabase) return false;
   try {
     const updateObj: any = { status };
     if(updates?.referenceImages)updateObj.reference_images=updates.referenceImages.map(ref=>withoutLegacyMask({...ref,data:persistMediaReference(ref.data)}));
@@ -1653,7 +1654,9 @@ export const updateVideoStatus = async (
       if (storagePath) updateObj.storage_path = storagePath;
     }
     if (updates?.metadata) {
-      const { data: existing } = await supabase.from('generations').select('metadata').eq('id', id).single();
+      // Fork (REVIEW Y4): do not overwrite saved metadata after a failed read.
+      const { data: existing, error: readError } = await supabase.from('generations').select('metadata').eq('id', id).single();
+      if (readError) throw new Error(`Could not preserve the saved video details: ${readError.message}`);
       const merged = mergeVideoMetadata(existing?.metadata || {}, updates.metadata);
       if (status === 'completed') {
         delete merged.error;
@@ -1661,9 +1664,12 @@ export const updateVideoStatus = async (
       }
       updateObj.metadata = merged;
     }
-    await supabase.from('generations').update(updateObj).eq('id', id);
+    const { error } = await supabase.from('generations').update(updateObj).eq('id', id);
+    if (error) throw new Error(error.message);
+    return true;
   } catch (e: any) {
     console.warn('updateVideoStatus error:', e.message);
+    return false;
   }
 };
 

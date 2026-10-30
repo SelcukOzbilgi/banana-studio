@@ -69,7 +69,9 @@ test('Wiro is first in Auto for the three image models, needs both key and secre
   assert.throws(()=>resolveProvider('wiro:black-forest-labs/flux-2-pro','openai',{wiro:true,openai:true}));
   assert.throws(()=>resolveProvider('wiro:black-forest-labs/flux-2-pro','auto',{openai:true}),/Wiro/);
   assert.throws(()=>resolveProvider('wiro:../etc','auto',{wiro:true}),/Unsupported/);
-  for(const model of ['seedance-2.5','minimax-h3','gpt-6.1-sol'])assert.ok(!MODEL_ROUTES[model].includes('wiro'),'video and text routes are unchanged');
+  // Fork: Seedance video now routes to Wiro first; H3 and text routes are unchanged.
+  for(const model of ['seedance-2.0','seedance-2.5'])assert.deepEqual(MODEL_ROUTES[model],['wiro','evolink','fal','openrouter']);
+  for(const model of ['minimax-h3','gpt-6.1-sol'])assert.ok(!MODEL_ROUTES[model].includes('wiro'),'H3 and text routes are unchanged');
   const saved={k:process.env.WIRO_API_KEY,s:process.env.WIRO_API_SECRET};
   try{
     process.env.WIRO_API_KEY=KEY;delete process.env.WIRO_API_SECRET;assert.equal(api.providerAvailability().wiro,false);
@@ -292,3 +294,31 @@ test('picker shows the saved Wiro selection with existing labels; the price labe
     assert.equal(ui.wiroCostLabel({imageModel:'wiro:black-forest-labs/flux-2-pro',wiroOptions:{}},models[2],2).label,'~$0.060 · Wiro');
   }finally{fs.rmSync(out,{force:true});}
 });
+
+test('fork: a queued job carries the folder style lock and Turkish spelling into the Wiro Run prompt',async()=>withKeys(async()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'banana-wiro-lock-'));const store=new api.LocalWorkspace(path.join(dir,'data'));api.setWorkspace(store);
+  const oldFetch=globalThis.fetch,oldUrl=process.env.SUPABASE_URL,oldRuntime=process.env.BANANA_RUNTIME;
+  process.env.SUPABASE_URL='http://127.0.0.1:9';process.env.BANANA_RUNTIME='local';
+  const wiro=fakeWiro(url=>{
+    if(url.pathname.startsWith('/v1/Run/'))return Response.json({result:true,errors:[],taskid:'778'});
+    if(url.pathname==='/v1/Task/Detail')return Response.json(detail('task_postprocess_end','0'));
+    if(url.hostname==='cdn1.wiro.ai')return new Response(PNG,{headers:{'content-type':'image/png'}});
+    throw new Error('Unexpected network request blocked by test');
+  });
+  globalThis.fetch=wiro.fetchImpl;
+  try{
+    const payload={id:'wiro-lock-1',model:'gpt-image-2.5-sunburst',provider:'wiro',prompt:'Poster with "ŞAŞIRTICI" headline',displayPrompt:'Poster',aspectRatio:'1:1',resolution:'1K',
+      options:{quality:'low'},referenceImages:[],privateReferencePaths:[],folderId:'f1',styleLock:{enabled:true,folderName:'saidwho',paragraph:'Muted film palette.',never:['neon']}};
+    store.workerRpc('enqueue_image_job',{p_id:payload.id,p_payload:payload,p_metadata:{generationProvider:'wiro',styleLock:{folderName:'saidwho'}}});
+    await api.runImageJob(store.client(true),{id:payload.id,userId:store.user.id});
+    const prompt=wiro.calls.find(c=>c.path.startsWith('/v1/Run/')).body.prompt;
+    assert.ok(prompt.includes('"ŞAŞIRTICI" headline'));assert.ok(prompt.includes('Ş-A-Ş-I-R-T-I-C-I'));
+    assert.ok(prompt.includes('FOLDER STYLE LOCK · saidwho\n'));assert.ok(prompt.includes('Muted film palette.'));assert.ok(prompt.includes('NEVER: neon'));
+    assert.equal(store.get('generations',payload.id).metadata.styleLock.folderName,'saidwho');
+  }finally{
+    globalThis.fetch=oldFetch;
+    if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;
+    if(oldRuntime===undefined)delete process.env.BANANA_RUNTIME;else process.env.BANANA_RUNTIME=oldRuntime;
+    store.close();fs.rmSync(dir,{recursive:true,force:true});
+  }
+}));

@@ -4,9 +4,9 @@ import Security
 enum ProviderKey: String, CaseIterable {
     case wiroKey = "WIRO_API_KEY", wiroSecret = "WIRO_API_SECRET"
     case openAI = "OPENAI_API_KEY", openRouter = "OPENROUTER_API_KEY", gemini = "GEMINI_API_KEY"
-    case fal = "FAL_KEY", evolink = "EVOLINK_API_KEY", youtube = "YOUTUBE_API_KEY"
+    case fal = "FAL_KEY", evolink = "EVOLINK_API_KEY", apify = "APIFY_TOKEN", youtube = "YOUTUBE_API_KEY"
     var label: String {
-        switch self { case .wiroKey: return "Wiro API key"; case .wiroSecret: return "Wiro API secret"; case .openAI: return "OpenAI"; case .openRouter: return "OpenRouter"; case .gemini: return "Google Gemini"; case .fal: return "fal.ai"; case .evolink: return "EvoLink"; case .youtube: return "YouTube Data API" }
+        switch self { case .wiroKey: return "Wiro API key"; case .wiroSecret: return "Wiro API secret"; case .openAI: return "OpenAI"; case .openRouter: return "OpenRouter"; case .gemini: return "Google Gemini"; case .fal: return "fal.ai"; case .evolink: return "EvoLink"; case .apify: return "YouTube · Apify"; case .youtube: return "YouTube Data API" }
     }
 }
 

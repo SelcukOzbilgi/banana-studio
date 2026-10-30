@@ -1,4 +1,5 @@
 import { modelRoutes } from '../../src/lib/providers.ts';
+import { sanitizeStyleLock } from '../../src/lib/styleLock/styleLock.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID, createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -115,6 +116,15 @@ export class LocalWorkspace {
     if(name==='get_text_model_preferences'||name==='save_text_model_preferences') {
       if(name.startsWith('save'))this.setting('textPreferences',{model:args.p_model,thinkingLevel:args.p_gemini_thinking,reasoningEffort:args.p_openai_reasoning});
       return {...(this.setting('textPreferences')||{model:'anthropic/claude-opus-5.5',thinkingLevel:'MEDIUM',reasoningEffort:'medium'}),source:'personal',canSaveAll:false,revision:1};
+    }
+    // Fork: per-folder style locks, kept in settings so the folder rows stay upstream-shaped.
+    if(name==='get_folder_style_locks'){const saved=this.setting('folderStyleLocks')||{};return Object.fromEntries(Object.entries(saved).filter(([id])=>this.get('folders',id)));}
+    if(name==='save_folder_style_lock'){
+      const id=typeof args.p_folder_id==='string'?args.p_folder_id:'';if(!id||id.length>200||!this.get('folders',id))throw new Error('Folder not found.');
+      const lock=args.p_lock==null?undefined:sanitizeStyleLock(args.p_lock);if(args.p_lock!=null&&!lock)throw new Error('Invalid style lock.');
+      const saved={...(this.setting('folderStyleLocks')||{})};
+      if(lock&&(lock.paragraph||lock.never.length))saved[id]={enabled:lock.enabled,paragraph:lock.paragraph,never:lock.never,updatedAt:Date.now()};else delete saved[id];
+      this.setting('folderStyleLocks',saved);return saved[id]??null;
     }
     if(name==='get_gallery_search_people')return this.all('generations').filter(row=>!args.p_after_id||row.id>args.p_after_id).sort((a,b)=>a.id.localeCompare(b.id)).slice(0,args.p_limit||500).map(row=>({id:row.id,people:[...new Set((row.reference_images||[]).map(r=>r.personName).filter(Boolean))]}));
     if(!trusted)throw new Error('This operation belongs to the local worker.');

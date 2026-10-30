@@ -9,6 +9,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { applyCors, createUserScopedClient, requireUser, type AuthenticatedUser } from './_lib/auth.js';
 import { calculateOpenAIImageCost, getOpenAIImageOptions, getOpenAIImageSize, SUNBURST_MODEL, validateOpenAIImageOptions, validateOpenAIImageSize } from '../src/lib/images/openaiImage.js';
 import { prepareSunburstGeneration, getSunburstEditIntent } from '../src/lib/images/imagePrompting.js';
+import { styleLockRecord } from '../src/lib/styleLock/styleLock.js';
 import { EDIT_REGION_REQUIRED, isValidEditRegion, copyEditRegion, describeEditRegion } from '../src/lib/images/imageEditRegion.js';
 import { readEditSource, compositeProtectedEdit } from './_lib/protectedImageEdit.js';
 import { readImageDimensions } from './_lib/imageDimensions.js';
@@ -138,7 +139,8 @@ export async function executeOpenAIImage(req:VercelRequest,res:VercelResponse,co
     openaiStartedAt: startedAt, generationStartedAt: startedAt,
     imagePromptCategory: body.imagePromptCategory, imageGenerationPrompt: generationPrompt,
     imageGenerationReferenceIds: generationReferences.map(ref => ref.id), imageRequestedSize: body.model === SUNBURST_MODEL || protectedSource ? size : wiroControls ? [body.wiroOptions?.resolution ?? wiroControls.resolution?.default, body.wiroOptions?.ratio ?? wiroControls.ratio?.default].filter(Boolean).join(' · ') || 'Model default' : `${body.resolution} · ${body.aspectRatio}`, openaiAuditId: guard.id,
-    ...(wiroControls ? { wiroOptions: body.wiroOptions || {} } : {}) };
+    ...(wiroControls ? { wiroOptions: body.wiroOptions || {} } : {}),
+    ...(styleLockRecord(generationPrompt, body.styleLock) ? { styleLock: styleLockRecord(generationPrompt, body.styleLock) } : {}) };
   if (editReference?.id.startsWith('gallery-')) metadata.imageEditSourceId = editReference.id.slice(8);
   try {
     const { error: insertError } = context.dispatch || context.resumeTask ? { error:null } : await db.from('generations').insert({

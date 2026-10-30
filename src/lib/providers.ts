@@ -25,8 +25,8 @@ export const MODEL_ROUTES: Record<string, readonly AIProvider[]> = {
   'anthropic/claude-opus-5.5': ['claude-cli', 'openrouter'],
   'gpt-6.1-sol': ['openai', 'openrouter'],
   'gemini-3.8-flash': ['gemini', 'openrouter'],
-  'seedance-2.0': ['evolink', 'fal', 'openrouter'],
-  'seedance-2.5': ['evolink', 'fal', 'openrouter'],
+  'seedance-2.0': ['wiro', 'evolink', 'fal', 'openrouter'],
+  'seedance-2.5': ['wiro', 'evolink', 'fal', 'openrouter'],
   'minimax-h3': ['fal'],
 };
 /** Wiro catalog models (`wiro:<owner>/<model>`) are served only by Wiro. */
