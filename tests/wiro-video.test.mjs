@@ -208,3 +208,12 @@ test('submit: only a definite refusal says no video was started; unclear replies
     if (status !== 400) assert.doesNotMatch(response.result.error, /No Wiro video was started/);
   }
 }));
+
+test('Text-only Seedance (client mode text_only) passes validation on every provider and maps to the fal text endpoint', async () => {
+  for (const provider of ['wiro', 'fal', 'openrouter', 'evolink']) {
+    assert.equal(seedanceProviderError(provider, request({ mode: 'text_only', aspectRatio: '16:9', duration: 5, quality: '720p' })), undefined, provider);
+  }
+  const { falSeedanceInput } = await import('../src/lib/video/seedanceProviders.ts');
+  assert.equal(falSeedanceInput(request({ mode: 'text_only' })).endpoint, 'bytedance/seedance-2.0/text-to-video');
+  assert.equal(seedanceProviderError('wiro', request({ mode: 'text_magic' })), 'Unsupported video operation.');
+});
