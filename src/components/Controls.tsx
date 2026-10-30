@@ -23,7 +23,7 @@ import { ImageEditArea } from './ImageEditArea';
 import { getOpenAIImageOptions, getOpenAIImageSize, getSunburstReferences, getImagePromptContextKey, SUNBURST_MODEL, validateOpenAIImageOptions, validateOpenAIImageSize } from '../lib/images/openaiImage';
 import React, { useRef, useState, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Sparkles, Pencil, X, Wand2, Plus, Minus, Loader2, ImagePlus, ChevronDown, ChevronUp, Check, Ratio, Scan, LayoutTemplate, Save, Trash2, RefreshCw, Eraser, Lightbulb, User, Users, Zap, Image as ImageIcon, Play, FileImage, FolderOpen, GripVertical, Video, Clock, Volume2, Music, Film, DollarSign, SkipForward, Rewind, FastForward, RotateCcw, AlertTriangle } from 'lucide-react';
+import { Sparkles, Pencil, X, Wand2, Plus, Minus, Loader2, ImagePlus, ChevronDown, ChevronUp, Check, Ratio, Scan, LayoutTemplate, Save, Trash2, RefreshCw, Eraser, Lightbulb, User, Users, Zap, Image as ImageIcon, Play, FileImage, FolderOpen, GripVertical, Video, Clock, Volume2, Music, Film, DollarSign, SkipForward, Rewind, FastForward, RotateCcw, AlertTriangle, Package } from 'lucide-react';
 import { GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, Template, BrainstormCategory, SavedReferenceImage, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, VIDEO_ASPECT_RATIO_OPTIONS, VIDEO_QUALITY_OPTIONS, VIDEO_DURATION_OPTIONS, DEFAULT_VIDEO_MODEL, GenerationMode, VideoModelId, VideoOperation, VideoPromptIntent, VideoAspectRatio, VideoQuality, VideoDuration, estimateVideoCost, getVideoPromptIntent, getPromptEnhancementTarget, isEnhancedPromptStale } from '../types';
 import { enhancePrompt, enhanceVideoPrompt } from '../services/geminiService';
 import { compressImage, estimateBase64Size, saveReferenceImage, getReferenceGallery, deleteReferenceImage, uploadVideoBlobToPublicUrl } from '../services/storageService';
@@ -34,6 +34,7 @@ import { PROVIDER_LABELS, type AIProvider } from '../lib/providers';
 import { createPromptPreparation } from '../lib/prompts/promptPreparation';
 import type { TextTaskStage } from '../services/geminiClient';
 import type { BrainstormGenerationRequest } from '../lib/brainstorm/brainstormGeneration';
+import { DEFAULT_PRODUCT_SHOT_MODE, PRODUCT_SHOT_MODES, isProductShotMode, type ProductShotMode } from '../lib/prompts/productShotModes';
 import { getOriginalImagePrompt } from '../lib/prompts/promptHistory';
 import { updateImageDraftPrompt, validateImageGenerationReferences, getSunburstEditIntent } from '../lib/images/imagePrompting';
 import { isValidEditRegion } from '../lib/images/imageEditRegion';
@@ -469,6 +470,11 @@ export const Controls: React.FC<ControlsProps> = ({
 
   // Brainstorm config only; accepted batches belong to the gallery workflow.
   const [brainstormCategory, setBrainstormCategory] = useState<BrainstormCategory>('youtube_thumbnail');
+  // Fork: Product mode is a UI preference (route names only), kept across sessions.
+  const [productShotMode, setProductShotModeState] = useState<ProductShotMode>(() => {
+    try { const saved = localStorage.getItem('banana-product-shot-mode'); return isProductShotMode(saved) ? saved : DEFAULT_PRODUCT_SHOT_MODE; } catch { return DEFAULT_PRODUCT_SHOT_MODE; }
+  });
+  const setProductShotMode = (mode: ProductShotMode) => { setProductShotModeState(mode); try { localStorage.setItem('banana-product-shot-mode', mode); } catch { /* preference only */ } };
   const [brainstormError, setBrainstormError] = useState<string | null>(null);
   const brainstormSubmitRef = useRef(false);
   const [isBrainstormPanelOpen, setIsBrainstormPanelOpen] = useState(false);
@@ -1058,7 +1064,7 @@ export const Controls: React.FC<ControlsProps> = ({
     try {
       const pendingPreferences = resolveTextModelPreferences();
       const preferences = pendingPreferences instanceof Promise ? await pendingPreferences : pendingPreferences;
-      onBrainstormGenerate({ settings: config, category: brainstormCategory, ideaCount: brainstormIdeaCount,
+      onBrainstormGenerate({ settings: brainstormCategory === 'product_shot' ? { ...config, productShotMode } : config, category: brainstormCategory, ideaCount: brainstormIdeaCount,
         textModel: preferences.model, reasoningEffort: preferences.reasoningEffort, thinkingLevel: preferences.thinkingLevel });
     } catch (error) {
       setBrainstormError(error instanceof Error ? error.message : 'Could not start Brainstorm.');
@@ -2737,6 +2743,7 @@ export const Controls: React.FC<ControlsProps> = ({
                             {[
                               { id: 'simple' as BrainstormCategory, label: 'Simple', icon: Sparkles },
                               { id: 'youtube_thumbnail' as BrainstormCategory, label: 'YouTube', icon: Zap },
+                              { id: 'product_shot' as BrainstormCategory, label: 'Product', icon: Package },
                             ].map(cat => (
                               <button
                                 key={cat.id}
@@ -2752,6 +2759,16 @@ export const Controls: React.FC<ControlsProps> = ({
                               </button>
                             ))}
                           </div>
+
+                          {brainstormCategory === 'product_shot' && (
+                            <label className="mt-3 flex items-center justify-between gap-2 bg-gray-900/60 border border-gray-800 rounded-lg px-2 py-1.5">
+                              <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Mode</span>
+                              <select value={productShotMode} onChange={event => isProductShotMode(event.target.value) && setProductShotMode(event.target.value)}
+                                aria-label="Product shot mode" className="min-w-0 max-w-[220px] bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-amber-500">
+                                {PRODUCT_SHOT_MODES.map(mode => <option key={mode.id} value={mode.id}>{mode.label}</option>)}
+                              </select>
+                            </label>
+                          )}
 
                           {/* Idea Count Selector */}
                           <div className="mt-3 flex items-center justify-between bg-gray-900/60 border border-gray-800 rounded-lg px-2 py-1.5">

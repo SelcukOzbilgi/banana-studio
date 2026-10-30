@@ -12,7 +12,7 @@ import { getConceptWardrobe } from '../brainstorm/brainstormWardrobe.js';
 import { hasYouTubeCameraGaze, stripYouTubeCameraGaze, YOUTUBE_CAMERA_GAZE_RULE } from '../youtube/youtubeCameraGaze.js';
 import { buildForkFinalPromptAddenda } from '../prompts/forkGuidance.js';
 
-export type ImagePromptSettings = Pick<GenerationConfig, 'imageModel' | 'aspectRatio' | 'resolution' | 'openaiImageOptions' | 'imagePromptCategory' | 'originalPrompt'>;
+export type ImagePromptSettings = Pick<GenerationConfig, 'imageModel' | 'aspectRatio' | 'resolution' | 'openaiImageOptions' | 'imagePromptCategory' | 'originalPrompt' | 'productShotMode'>;
 
 // UI mentions and provider inputs use the same upload order.
 // Quoted copy and ordinary prose must survive without whitespace/word rewrites.

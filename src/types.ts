@@ -484,6 +484,8 @@ export interface GenerationConfig {
   /** Ratio/resolution/quality for Wiro catalog models (`wiro:` IDs). */
   wiroOptions?: WiroImageOptions;
   imagePromptCategory?: BrainstormCategory;
+  /** Fork: Brainstorm "Product" presentation mode; 'standard' adds nothing. */
+  productShotMode?: import('./lib/prompts/productShotModes.js').ProductShotMode;
   referenceImages: ReferenceImage[];
   /** Draft/template identities, including people with no assigned photo yet. */
   personGroups?: PersonGroupDefinition[];

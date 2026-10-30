@@ -6,6 +6,7 @@ import { build } from 'esbuild';
 const bundle = await build({ stdin: { resolveDir: process.cwd(), loader: 'js', contents: `
 export * from './src/lib/prompts/craftRules.ts';
 export { buildForkTextGuidance, buildForkFinalPromptAddenda } from './src/lib/prompts/forkGuidance.ts';
+export { PRODUCT_SHOT_MODES, buildProductShotModeGuidance, isProductShotMode } from './src/lib/prompts/productShotModes.ts';
 export { buildSunburstGenerationPrompt } from './src/lib/images/imagePrompting.ts';` },
   bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent' });
 const m = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
@@ -60,4 +61,23 @@ test('the final Sunburst prompt keeps quoted copy verbatim and appends the spell
   assert.ok(final.includes('Ş-A-Ş-I-R-T-I-C-I / S-O-N-U-Ç'));
   assert.ok(final.indexOf('CREATIVE BRIEF') < final.indexOf('EXACT TEXT SPELLING'));
   assert.ok(!m.buildSunburstGenerationPrompt('A quiet beach at dawn', [], settings).includes('EXACT TEXT SPELLING'));
+});
+
+test('product shot Standard adds nothing; other modes add one guidance block', () => {
+  assert.equal(m.PRODUCT_SHOT_MODES[0].id, 'standard');
+  assert.equal(m.buildProductShotModeGuidance('standard'), '');
+  assert.equal(m.buildProductShotModeGuidance('unknown'), '');
+  for (const { id, label } of m.PRODUCT_SHOT_MODES.slice(1)) {
+    const block = m.buildProductShotModeGuidance(id);
+    assert.ok(block.startsWith(`PRODUCT SHOT MODE · ${label.toUpperCase()}`), id);
+    assert.match(block, /never write aspect ratios/);
+  }
+  const context = { task: 'brainstorm', category: 'product_shot', brief: 'Bottle', edit: false, youtube: false };
+  const standard = m.buildForkTextGuidance({ ...context, settings: { productShotMode: 'standard' } });
+  assert.doesNotMatch(standard, /PRODUCT SHOT MODE/);
+  assert.match(m.buildForkTextGuidance({ ...context, settings: { productShotMode: 'pinterest' } }), /PRODUCT SHOT MODE · PINTEREST PIN/);
+  // Only Product Brainstorm uses the mode; Enhance, other categories and local edits do not.
+  for (const other of [{ task: 'enhance' }, { category: 'simple' }, { edit: true }]) {
+    assert.doesNotMatch(m.buildForkTextGuidance({ ...context, ...other, settings: { productShotMode: 'studio' } }), /PRODUCT SHOT MODE/);
+  }
 });
