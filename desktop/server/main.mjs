@@ -31,7 +31,7 @@ import seedanceVideo from '../../api/seedance-video.ts';
 import { chooseProvider } from '../../api/_lib/providerConfiguration.ts';
 import { seedanceProviderError } from '../../src/lib/video/seedanceProviders.ts';
 
-const KEY_NAMES=new Set(['WIRO_API_KEY','WIRO_API_SECRET','OPENAI_API_KEY','OPENROUTER_API_KEY','GEMINI_API_KEY','YOUTUBE_API_KEY','FAL_KEY','EVOLINK_API_KEY']);
+const KEY_NAMES=new Set(['WIRO_API_KEY','WIRO_API_SECRET','OPENAI_API_KEY','OPENROUTER_API_KEY','GEMINI_API_KEY','YOUTUBE_API_KEY','APIFY_TOKEN','FAL_KEY','EVOLINK_API_KEY']);
 const io=readline.createInterface({input:process.stdin,crlfDelay:Infinity});
 const first=await new Promise(resolve=>io.once('line',resolve));
 let launch;try{launch=JSON.parse(first);}catch{process.exit(1);}

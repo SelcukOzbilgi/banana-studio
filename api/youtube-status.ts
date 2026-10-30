@@ -8,7 +8,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (!await requireUser(req, res)) return;
 
-  const configured = Boolean(process.env.YOUTUBE_API_KEY);
+  // Fork: report which source serves YouTube lookups (Apify token first, Google key as fallback).
+  const source = process.env.APIFY_TOKEN?.trim() ? 'apify' : process.env.YOUTUBE_API_KEY ? 'google' : null;
   res.setHeader('Cache-Control', 'no-store');
-  return res.status(200).json({ configured });
+  return res.status(200).json({ configured: source !== null, source });
 }

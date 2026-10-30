@@ -61,7 +61,7 @@ export function ProviderRoutingSettings() {
       {PROVIDER_LABELS[provider]} · {route.available[provider] ? 'configured' : provider === 'wiro' ? 'key and secret missing' : provider === 'claude-cli' ? 'CLI bulunamadı' : 'key missing'}</li>)}</ul>
     {Object.keys(MODELS).map(model => <div key={model}><p className="mb-1.5 text-sm text-gray-200">{MODELS[model]}</p><ProviderRouteControl model={model} showError={false} /></div>)}
     {isLocalWorkspace() && <ClaudeCliSettings />}
-    <p className="text-xs leading-relaxed text-gray-500">fal.ai covers image/video models; Enhance and Brainstorm require OpenRouter, OpenAI or Gemini{isLocalWorkspace() ? ', or Claude Opus 5.5 through your own Claude subscription (local Claude Code CLI)' : ''}. YouTube lookup uses a separate YouTube Data API key. H3 Max requires fal.ai. Seedance 2.5 Relaxed is an EvoLink option; other routes use standard Seedance 2.5.</p>
+    <p className="text-xs leading-relaxed text-gray-500">fal.ai covers image/video models; Enhance and Brainstorm require OpenRouter, OpenAI or Gemini{isLocalWorkspace() ? ', or Claude Opus 5.5 through your own Claude subscription (local Claude Code CLI)' : ''}. YouTube lookup uses the Apify token (“YouTube · Apify”, paid per video) when set, otherwise a separate YouTube Data API key. H3 Max requires fal.ai. Seedance 2.5 Relaxed is an EvoLink option; other routes use standard Seedance 2.5.</p>
   </section>;
 }
 

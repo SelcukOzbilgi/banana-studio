@@ -25,5 +25,7 @@ final class KeyVaultTests: XCTestCase {
         XCTAssertEqual(ProviderKey.wiroKey.rawValue, "WIRO_API_KEY")
         XCTAssertEqual(ProviderKey.wiroSecret.rawValue, "WIRO_API_SECRET")
         XCTAssertTrue(ProviderKey.wiroSecret.label.contains("Wiro"))
+        XCTAssertEqual(ProviderKey.apify.rawValue, "APIFY_TOKEN")
+        XCTAssertTrue(ProviderKey.apify.label.contains("Apify"))
     }
 }

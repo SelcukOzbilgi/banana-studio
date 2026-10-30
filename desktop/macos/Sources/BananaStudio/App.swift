@@ -68,7 +68,7 @@ final class BananaStudioApp: NSObject, NSApplicationDelegate, NSWindowDelegate, 
         updater.checkForUpdates(self)
     }
     @objc func showKeys() {
-        let alert = NSAlert(); alert.messageText = "Provider API Keys"; alert.informativeText = "Add only the providers you use. Wiro is tried first for images and needs both its API key and API secret (Signature mode; the secret never leaves this Mac). OpenRouter can cover text, images and supported Seedance video; fal.ai covers images and video. Choose Auto or a provider in AI settings. Keys stay in macOS Keychain. Blank fields keep existing keys. Remove clears a saved key."
+        let alert = NSAlert(); alert.messageText = "Provider API Keys"; alert.informativeText = "Add only the providers you use. Wiro is tried first for images and Seedance video and needs both its API key and API secret (Signature mode; the secret never leaves this Mac). OpenRouter can cover text, images and supported Seedance video; fal.ai covers images and video. YouTube data uses the Apify token when set (paid per video) and the YouTube Data API key otherwise. Choose Auto or a provider in AI settings. Keys stay in macOS Keychain. Blank fields keep existing keys. Remove clears a saved key."
         alert.addButton(withTitle: "Save"); alert.addButton(withTitle: "Cancel")
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
         var rows: [(ProviderKey, NSSecureTextField, NSButton)] = []

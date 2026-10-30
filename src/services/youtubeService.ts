@@ -131,12 +131,21 @@ const parseDuration = (iso: string): number => {
   );
 };
 
+// Fork: active lookup source reported by /api/youtube-status (Apify token or Google key).
+let youtubeSource: 'apify' | 'google' | null | undefined;
+export const getYouTubeSource = async (): Promise<'apify' | 'google' | null> => {
+  if (youtubeSource === undefined) await isYouTubeConfigured();
+  return youtubeSource ?? null;
+};
+
 const apiFetch = async (
   endpoint: string,
   params: Record<string, string>,
   options: { signal?: AbortSignal } = {},
 ): Promise<any> => {
-  const task = createTaskDeadline(20_000, options.signal, 'YouTube lookup timed out. Please try again.');
+  // Fork: Apify actor runs take longer than a Data API call.
+  const apify = (await getYouTubeSource()) === 'apify';
+  const task = createTaskDeadline(apify ? 180_000 : 20_000, options.signal, 'YouTube lookup timed out. Please try again.');
   try {
     task.signal.throwIfAborted();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -178,6 +187,7 @@ export const isYouTubeConfigured = async (): Promise<boolean> => {
     const res = await fetch(YOUTUBE_STATUS_ENDPOINT, { cache: 'no-store', headers: { Authorization: `Bearer ${session.access_token}` } });
     if (!res.ok) return false;
     const data = await res.json();
+    youtubeSource = data?.source === 'apify' || data?.source === 'google' ? data.source : null;
     return Boolean(data?.configured);
   } catch {
     return false;
