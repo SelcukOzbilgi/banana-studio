@@ -18,7 +18,7 @@ import { getImageCostHistory } from './services/imageCostHistory';
 import type { ImageCostSample } from './lib/images/imageCostPreview';
 import { resumeGptImage2Task } from './services/falImageService';
 import { createVideoTask, pollVideoTask, logVideoUsage, RecoverableVideoTaskError, isRecoverableVideoTaskError } from './services/runwayService';
-import { loadFolderStyleLocks, setActiveStyleLockFolder } from './services/styleLockService';
+import { getFolderStyleLock, loadFolderStyleLocks, setActiveStyleLockFolder } from './services/styleLockService';
 import { getSeedanceFrameError } from './lib/video/seedanceFrames';
 import { getSession, supabase } from './services/authService';
 import { H3_MAX_CAPABILITIES } from './lib/video/h3Max';
@@ -1468,7 +1468,9 @@ const AuthorizedWorkspace: React.FC<{
       const variedPrompt = await generatePromptVariation(
         resolved.prompt,
         variationReferences,
-        { imageModel, aspectRatio: resolved.aspectRatio, resolution: resolved.resolution, openaiImageOptions: resolved.openaiImageOptions, imagePromptCategory: resolved.imagePromptCategory },
+        // Fork: the source item's folder lock, the same one its image submission uses (not the open folder's).
+        { imageModel, aspectRatio: resolved.aspectRatio, resolution: resolved.resolution, openaiImageOptions: resolved.openaiImageOptions, imagePromptCategory: resolved.imagePromptCategory,
+          styleLock: getFolderStyleLock(media.folderId || currentFolderId) },
         textOptions,
       );
 

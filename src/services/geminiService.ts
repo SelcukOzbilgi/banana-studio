@@ -253,7 +253,7 @@ const runImagePromptTask = async (
     .join('\n\n');
   const brief = [prompt, customInstructions].filter(Boolean).join('\n\n');
   const guidance = [buildSunburstGuidance(task, references, settings, category, count, brief),
-    buildForkTextGuidance({ task, category, brief, originalPrompt: settings.originalPrompt, aspectRatio: settings.aspectRatio, settings: { ...settings, styleLock: settings.styleLock ?? getActiveStyleLock() },
+    buildForkTextGuidance({ task, category, brief, originalPrompt: settings.originalPrompt, aspectRatio: settings.aspectRatio, settings: { ...settings, styleLock: 'styleLock' in settings ? settings.styleLock : getActiveStyleLock() },
       edit: !!getSunburstEditIntent(prompt, references, settings), youtube: category === 'youtube_thumbnail' || isYouTubeThumbnailPrompt(brief, references, settings) })].filter(Boolean).join('\n\n');
   const wardrobeRequired = task === 'brainstorm' && needsBrainstormWardrobe(brief, references, settings, category, count);
   const parts: any[] = [{ text: wardrobeRequired
