@@ -10,7 +10,8 @@ export const wiroPolling = { windowMs: 240_000, intervalMs: 3_000 };
 type FetchLike = typeof fetch;
 
 export class WiroError extends Error {
-  constructor(message: string, readonly status?: number) { super(message); }
+  /** rejected: Wiro (or local validation) refused the request, so nothing was started. */
+  constructor(message: string, readonly status?: number, readonly rejected = false) { super(message); }
 }
 /** The task was accepted but is still running when this attempt's time ran out. */
 export class WiroTaskPending extends Error {
@@ -41,7 +42,9 @@ export async function wiroPost(path: string, body: Record<string, unknown> | For
   const data: any = await response.json().catch(() => null);
   if (!response.ok || data?.result !== true) {
     const detail = errorText(data);
-    throw new WiroError(`Wiro rejected the request (${response.status})${detail ? `: ${detail}` : ''}.`, response.status);
+    // Only a 4xx or a parsed `result: false` is a definite refusal; a 5xx or unreadable body may hide an accepted task.
+    const rejected = response.status < 500 && (response.status >= 400 || data?.result === false);
+    throw new WiroError(`Wiro rejected the request (${response.status})${detail ? `: ${detail}` : ''}.`, response.status, rejected);
   }
   return data;
 }

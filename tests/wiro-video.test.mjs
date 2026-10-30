@@ -178,3 +178,33 @@ test('status: a failed Wiro task is terminal and says it was not billed; unknown
   assert.equal((await h.call('GET', 'bs_wiro_seedance-2.0_unknown')).status, 404);
   assert.equal((await h.call('GET', 'bs_wiro_minimax-h3_9001')).status, 400);
 }));
+
+test('submit: concurrent clicks cannot pass the cap while a paid Run is still in flight', async () => harness(async h => {
+  h.store.put('generations', 'a', { id: 'a', user_id: h.store.user.id, type: 'video', status: 'processing', task_id: 'bs_wiro_seedance-2.0_a', metadata: {}, created_at: Date.now() });
+  h.pending('c1'); h.pending('c2');
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  h.setScript(async url => { if (!url.pathname.startsWith('/v1/Run/')) throw new Error('unexpected'); await gate; return Response.json({ result: true, errors: [], taskid: '9101' }); });
+  const first = h.call('POST', request({ generationId: 'c1' })), second = h.call('POST', request({ generationId: 'c2' }));
+  const blocked = await second;
+  assert.equal(blocked.status, 429); assert.match(blocked.result.error, /no request was sent/);
+  release();
+  assert.equal((await first).status, 200);
+  assert.equal(h.calls.filter(c => c.path.startsWith('/v1/Run/')).length, 1, 'only one paid Run started');
+}));
+
+test('submit: only a definite refusal says no video was started; unclear replies say acceptance is unconfirmed', async () => harness(async h => {
+  h.pending('e1');
+  const cases = [
+    [() => Response.json({ result: false, errors: [{ message: 'bad ratio' }] }), 400, /bad ratio.*No Wiro video was started/],
+    [() => Response.json({ result: false, errors: [{ message: 'busy' }] }, { status: 503 }), 502, /could not be confirmed.*not retried/],
+    [() => new Response('<html>gateway</html>', { status: 200 }), 502, /could not be confirmed/],
+    [() => Response.json({ result: true, errors: [] }), 502, /returned no task ID.*could not be confirmed/],
+    [() => { throw new TypeError('socket hang up'); }, 502, /could not be confirmed/],
+  ];
+  for (const [respond, status, message] of cases) {
+    h.setScript(respond);
+    const response = await h.call('POST', request({ generationId: 'e1' }));
+    assert.equal(response.status, status); assert.match(response.result.error, message);
+    if (status !== 400) assert.doesNotMatch(response.result.error, /No Wiro video was started/);
+  }
+}));

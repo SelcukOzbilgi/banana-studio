@@ -3,7 +3,7 @@
  * sent as multipart files; Wiro cannot read loopback URLs. Field names come
  * from Wiro's model schemas (bytedance/seedance-2-0, bytedance/seedance-2-5),
  * read with the free schema tool on 2026-10-30. */
-import { isWiroOutputUrl, parseWiroTask, wiroPost, WiroError } from './wiro.js';
+import { isWiroOutputUrl, parseWiroTask, wiroCredentials, wiroPost, WiroError } from './wiro.js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { SeedanceRequest } from '../../src/lib/video/seedanceProviders.js';
 import { createUserScopedClient } from './auth.js';
@@ -13,6 +13,9 @@ import { signedMediaUrl } from './imageStorage.js';
 type FetchLike = typeof fetch;
 export const WIRO_VIDEO_SLUGS: Record<string, string> = { 'seedance-2.0': 'bytedance/seedance-2-0', 'seedance-2.5': 'bytedance/seedance-2-5' };
 export const WIRO_VIDEO_MAX_ACTIVE = 2;
+/** Submissions between the cap check and the saved task, per user. The desktop
+ * server is one process, so this closes the check-then-act gap of the cap. */
+const submitting = new Map<string, Set<string>>();
 const MAX_VIDEO_BYTES = 256 * 1024 * 1024;
 const DATA_URL = /^data:((?:image\/(?:png|jpeg|webp))|(?:audio\/(?:mpeg|wav|x-wav|mp3)));base64,([a-zA-Z0-9+/=]+)$/;
 const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav' };
@@ -55,9 +58,12 @@ export function wiroVideoRunBody(request: WiroVideoRequest): Record<string, stri
 
 /** The paid call. Returns Wiro's raw task ID. */
 export async function submitWiroVideo(body: SeedanceRequest, options: { fetchImpl?: FetchLike } = {}): Promise<{ taskId: string; slug: string }> {
-  const request = wiroVideoRequest(body);
+  // Everything that can fail before the paid call is marked rejected: nothing was sent.
+  let request: WiroVideoRequest, runBody: Record<string, string> | FormData, credentials: { key: string; secret: string };
+  try { request = wiroVideoRequest(body); runBody = wiroVideoRunBody(request); credentials = wiroCredentials(); }
+  catch (error) { throw new WiroError((error as Error).message, undefined, true); }
   const [owner, project] = request.slug.split('/');
-  const run = await wiroPost(`/Run/${owner}/${project}`, wiroVideoRunBody(request), { fetchImpl: options.fetchImpl, signal: AbortSignal.timeout(120_000) });
+  const run = await wiroPost(`/Run/${owner}/${project}`, runBody, { fetchImpl: options.fetchImpl, credentials, signal: AbortSignal.timeout(120_000) });
   const taskId = String(run.taskid ?? '');
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(taskId)) throw new WiroError('Wiro accepted the video request but returned no task ID. Check Wiro usage before generating again.');
   return { taskId, slug: request.slug };
@@ -127,20 +133,32 @@ export async function handleWiroSeedancePost(req: VercelRequest, res: VercelResp
     if (!owned) return res.status(400).json({ error: 'This video job is not saved yet, so Wiro could not be tracked. No request was sent.' });
     // One paid Run per generation: a saved task is recovered, never submitted again.
     if (typeof owned.task_id === 'string' && owned.task_id) return res.status(409).json({ error: `This video already has a provider task (${owned.task_id}). It was not submitted again.` });
-    if (await activeWiroVideoCount(db, userId) >= WIRO_VIDEO_MAX_ACTIVE) return res.status(429).json({ error: `${WIRO_VIDEO_MAX_ACTIVE} Wiro videos are already rendering. Wait for one to finish; no request was sent.` });
+    const active = await activeWiroVideoCount(db, userId);
+    // Read the in-flight set after the await; nothing below awaits before it is updated.
+    const inFlight = submitting.get(userId) ?? new Set<string>();
+    if (inFlight.has(generationId)) return res.status(409).json({ error: 'This video is already being submitted. It was not submitted again.' });
+    if (active + inFlight.size >= WIRO_VIDEO_MAX_ACTIVE) return res.status(429).json({ error: `${WIRO_VIDEO_MAX_ACTIVE} Wiro videos are already rendering. Wait for one to finish; no request was sent.` });
+    submitting.set(userId, inFlight.add(generationId));
   } catch { return res.status(503).json({ error: 'Active Wiro video jobs could not be checked. No request was sent.' }); }
-  let submitted: { taskId: string; slug: string };
-  try { submitted = await submitWiroVideo(body, options); }
-  catch (error) {
-    // A rejected Run has no task; a lost connection may have created one.
-    if (error instanceof WiroError) return res.status(error.status && error.status < 500 ? 400 : 502).json({ error: `${error.message} No Wiro video was started.` });
-    return res.status(502).json({ error: 'The Wiro video request could not be confirmed. Check Wiro usage before submitting again; it was not retried.' });
+  try {
+    let submitted: { taskId: string; slug: string };
+    try { submitted = await submitWiroVideo(body, options); }
+    catch (error) {
+      // Only a definite refusal means no task exists; anything else may have created one.
+      if (error instanceof WiroError && error.rejected) return res.status(400).json({ error: `${error.message} No Wiro video was started.` });
+      const detail = error instanceof WiroError ? `${error.message} ` : '';
+      return res.status(502).json({ error: `${detail}Wiro acceptance of this video could not be confirmed. Check Wiro usage before submitting again; it was not retried.` });
+    }
+    const taskId = `bs_wiro_${body.videoModel}_${submitted.taskId}`;
+    try { await registerProviderTask(registry, 'wiro', taskId, userId); }
+    catch (error) { return res.status(502).json({ error: (error as Error).message }); }
+    const taskSaved = await saveWiroVideoTask(db, userId, generationId, taskId, submitted.taskId, submitted.slug).catch(() => false);
+    return res.status(200).json({ taskId, provider: 'wiro', endpoint: submitted.slug, wiroTaskId: submitted.taskId, taskSaved });
+  } finally {
+    const inFlight = submitting.get(userId);
+    inFlight?.delete(generationId);
+    if (inFlight && !inFlight.size) submitting.delete(userId);
   }
-  const taskId = `bs_wiro_${body.videoModel}_${submitted.taskId}`;
-  try { await registerProviderTask(registry, 'wiro', taskId, userId); }
-  catch (error) { return res.status(502).json({ error: (error as Error).message }); }
-  const taskSaved = await saveWiroVideoTask(db, userId, generationId, taskId, submitted.taskId, submitted.slug).catch(() => false);
-  return res.status(200).json({ taskId, provider: 'wiro', endpoint: submitted.slug, wiroTaskId: submitted.taskId, taskSaved });
 }
 
 /** GET status. The finished file is copied to workspace storage (Wiro CDN CORS is not relied on). */

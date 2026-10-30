@@ -1015,15 +1015,28 @@ export const createVideoTask = async (
   if (preparedRouteError) throw new Error(preparedRouteError);
   const { data: { session: submitSession } } = await supabase.auth.getSession();
   if (submitSession?.user?.id !== initiatingUserId) throw new Error('Session changed before video submission.');
-  const createRes = await fetch('/api/seedance-video', {
-    method: 'POST',
-    headers: await getServerAuthHeaders(initiatingUserId),
-    body: JSON.stringify(body),
-  });
+  const headers = await getServerAuthHeaders(initiatingUserId);
+  // Fork: the server saves a Wiro task before replying, so a lost reply is recovered after refresh, never resubmitted.
+  const wiro = selectedProvider === 'wiro';
+  let createRes: Response;
+  try {
+    createRes = await fetch('/api/seedance-video', { method: 'POST', headers, body: JSON.stringify(body) });
+  } catch (error) {
+    if (wiro) throw new RecoverableVideoTaskError('Wiro did not confirm whether the video was accepted. Do not submit again; it will be checked after refresh.');
+    throw error;
+  }
 
   const createData = await createRes.json().catch(() => null);
-  if (!createRes.ok) throw new Error(createData?.error || 'Failed to start video generation');
-  if (!createData?.taskId) throw new Error('No task ID returned');
+  if (!createRes.ok) {
+    // 503 is only returned before the paid Run; other 5xx or an empty body may hide an accepted task.
+    if (wiro && !createData?.taskId && (!createData || (createRes.status >= 500 && createRes.status !== 503)))
+      throw new RecoverableVideoTaskError(createData?.error || 'Wiro acceptance could not be confirmed. Do not submit again; it will be checked after refresh.');
+    throw new Error(createData?.error || 'Failed to start video generation');
+  }
+  if (!createData?.taskId) {
+    if (wiro) throw new RecoverableVideoTaskError('Wiro did not confirm a task ID. Do not submit again; it will be checked after refresh.');
+    throw new Error('No task ID returned');
+  }
 
   const usage = createData.usage && typeof createData.usage === 'object'
     ? createData.usage
