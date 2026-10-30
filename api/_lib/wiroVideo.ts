@@ -122,9 +122,11 @@ export async function handleWiroSeedancePost(req: VercelRequest, res: VercelResp
   // Every paid Wiro run must be tracked on an owned, saved generation: recovery and the concurrency cap depend on it.
   const generationId = typeof body.generationId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(body.generationId) ? body.generationId : '';
   try {
-    const { data: owned, error } = generationId ? await db.from('generations').select('id').eq('id', generationId).eq('user_id', userId).maybeSingle() : { data: null, error: null };
+    const { data: owned, error } = generationId ? await db.from('generations').select('id,task_id').eq('id', generationId).eq('user_id', userId).maybeSingle() : { data: null, error: null };
     if (error) throw error;
     if (!owned) return res.status(400).json({ error: 'This video job is not saved yet, so Wiro could not be tracked. No request was sent.' });
+    // One paid Run per generation: a saved task is recovered, never submitted again.
+    if (typeof owned.task_id === 'string' && owned.task_id) return res.status(409).json({ error: `This video already has a provider task (${owned.task_id}). It was not submitted again.` });
     if (await activeWiroVideoCount(db, userId) >= WIRO_VIDEO_MAX_ACTIVE) return res.status(429).json({ error: `${WIRO_VIDEO_MAX_ACTIVE} Wiro videos are already rendering. Wait for one to finish; no request was sent.` });
   } catch { return res.status(503).json({ error: 'Active Wiro video jobs could not be checked. No request was sent.' }); }
   let submitted: { taskId: string; slug: string };

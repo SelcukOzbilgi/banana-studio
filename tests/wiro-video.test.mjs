@@ -119,6 +119,10 @@ test('submit: one signed Run, task saved on the generation before replying, secr
   assert.equal(row.task_id, 'bs_wiro_seedance-2.0_9001'); assert.equal(row.status, 'processing');
   assert.deepEqual([row.metadata.generationProvider, row.metadata.providerTaskId, row.metadata.providerModel, row.metadata.videoModel], ['wiro', '9001', 'bytedance/seedance-2-0', 'seedance-2.0']);
   assert.ok(h.store.get('provider_tasks', 'wiro:bs_wiro_seedance-2.0_9001'));
+  // A repeated submit for the same generation never pays twice.
+  const again = await h.call('POST', request({ generationId: 'vid-1' }));
+  assert.equal(again.status, 409); assert.match(again.result.error, /not submitted again/);
+  assert.equal(h.calls.length, 1);
 }));
 
 test('submit: at most two Wiro videos render at once; a rejected Run says no video was started', async () => harness(async h => {
