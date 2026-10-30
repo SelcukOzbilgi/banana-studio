@@ -124,13 +124,18 @@ test('submit: one signed Run, task saved on the generation before replying, secr
 test('submit: at most two Wiro videos render at once; a rejected Run says no video was started', async () => harness(async h => {
   for (const id of ['a', 'b']) h.store.put('generations', id, { id, user_id: h.store.user.id, type: 'video', status: 'processing', task_id: `bs_wiro_seedance-2.0_${id}`, metadata: {}, created_at: Date.now() });
   h.setScript(() => { throw new Error('Run must not be called'); });
-  let response = await h.call('POST', request());
+  // Untracked submissions are refused before the paid call.
+  let response = await h.call('POST', request({ generationId: 'not-saved' }));
+  assert.equal(response.status, 400); assert.match(response.result.error, /not saved yet.*No request was sent/);
+  assert.equal((await h.call('POST', request())).status, 400);
+  h.pending('vid-cap');
+  response = await h.call('POST', request({ generationId: 'vid-cap' }));
   assert.equal(response.status, 429); assert.match(response.result.error, /no request was sent/); assert.equal(h.calls.length, 0);
   h.store.put('generations', 'b', { ...h.store.get('generations', 'b'), status: 'completed' });
   h.setScript(() => Response.json({ result: false, errors: [{ message: 'insufficient balance' }] }, { status: 400 }));
-  response = await h.call('POST', request());
+  response = await h.call('POST', request({ generationId: 'vid-cap' }));
   assert.equal(response.status, 400); assert.match(response.result.error, /insufficient balance.*No Wiro video was started/);
-  response = await h.call('POST', request({ videoModel: 'seedance-2.5', duration: -1 }));
+  response = await h.call('POST', request({ generationId: 'vid-cap', videoModel: 'seedance-2.5', duration: -1 }));
   assert.equal(response.status, 400); assert.match(response.result.error, /fixed duration/);
   assert.equal(h.calls.length, 1, 'validation errors never reach Wiro');
 }));
