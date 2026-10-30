@@ -10,6 +10,7 @@ export { buildReferenceGenerationRule } from './sunburstPromptGuide.js';
 import { EDIT_REGION_REQUIRED, isValidEditRegion } from './imageEditRegion.js';
 import { getConceptWardrobe } from '../brainstorm/brainstormWardrobe.js';
 import { hasYouTubeCameraGaze, stripYouTubeCameraGaze, YOUTUBE_CAMERA_GAZE_RULE } from '../youtube/youtubeCameraGaze.js';
+import { buildForkFinalPromptAddenda } from '../prompts/forkGuidance.js';
 
 export type ImagePromptSettings = Pick<GenerationConfig, 'imageModel' | 'aspectRatio' | 'resolution' | 'openaiImageOptions' | 'imagePromptCategory' | 'originalPrompt'>;
 
@@ -313,6 +314,7 @@ const composeSunburstGenerationPrompt = (prompt: string, references: ReferenceIm
       thumbnail ? `YOUTUBE THUMBNAIL DIRECTION\nUse the requested medium and composition. For an open brief, create a readable photographic cover with a clear focal hierarchy and a short Turkish headline or no text. Respect exact copy and no-text requests.${episodeContext ? ' Advertise the whole episode promise; supporting details must not become a different headline or dominant topic.' : ''} Do not invent cast, events or claims.` : '',
       wardrobe,
       `CREATIVE BRIEF\n${creative}`,
+      buildForkFinalPromptAddenda(prompt, settings, false),
     ].filter(Boolean).join('\n\n');
   }
   // Intent and context were resolved before unused episode covers were removed.
@@ -323,6 +325,7 @@ const composeSunburstGenerationPrompt = (prompt: string, references: ReferenceIm
     settings.originalPrompt?.trim() && settings.originalPrompt.trim() !== prompt.trim() ? `USER EDIT SCOPE\n${normalizeSunburstPrompt(stripYouTubeCameraGaze(settings.originalPrompt), references)}\nThe user's original edit request defines the permitted changes. Prompt expansion cannot authorize extra retouching or face reconstruction.` : '',
     buildPersonSeparationRule(getSunburstReferences(references)),
     `SOURCE PRESERVATION\n${LOCAL_EDIT_PRESERVATION}\n${LOCAL_EDIT_FACE_PRESERVATION}`,
+    buildForkFinalPromptAddenda(prompt, settings, true),
   ].filter(Boolean).join('\n\n');
 };
 
