@@ -8,7 +8,7 @@ export const APIFY_ACTOR = 'streamers~youtube-scraper';
 const RUN_URL = `https://api.apify.com/v2/acts/${APIFY_ACTOR}/run-sync-get-dataset-items`;
 /** Regular videos fetched per channel (newest first). Bounds the cost of one channel lookup. */
 export const APIFY_CHANNEL_VIDEOS = 50;
-const PRICE_CAP_PER_ITEM_USD = 0.005;
+const PRICE_CAP_PER_ITEM_USD = 0.01;
 const CACHE_TTL_MS = 30 * 60_000;
 const MAX_CACHED_CHANNELS = 40;
 const MAX_CACHED_ENTRIES = 5000;
@@ -64,7 +64,7 @@ async function runActor(token: string, input: Record<string, unknown>, maxItems:
   reserveBudget(maxItems);
   const url = new URL(RUN_URL);
   url.searchParams.set('timeout', '150'); url.searchParams.set('maxItems', String(maxItems));
-  url.searchParams.set('maxTotalChargeUsd', (maxItems * PRICE_CAP_PER_ITEM_USD + 0.01).toFixed(2));
+  url.searchParams.set('maxTotalChargeUsd', (maxItems * PRICE_CAP_PER_ITEM_USD + 0.05).toFixed(2));
   url.searchParams.set('clean', 'true'); url.searchParams.set('format', 'json');
   let response: Response;
   try {

@@ -56,7 +56,7 @@ test('one bounded channel run serves channels, playlistItems and videos; the tok
   assert.equal(run.url.origin + run.url.pathname, 'https://api.apify.com/v2/acts/streamers~youtube-scraper/run-sync-get-dataset-items');
   assert.equal(run.headers.Authorization, `Bearer ${TOKEN}`); assert.ok(!run.url.href.includes(TOKEN)); assert.equal(run.redirect, 'error');
   assert.equal(run.url.searchParams.get('maxItems'), String(api.APIFY_CHANNEL_VIDEOS));
-  assert.ok(Number(run.url.searchParams.get('maxTotalChargeUsd')) <= 0.3);
+  assert.equal(run.url.searchParams.get('maxTotalChargeUsd'), '0.55');
   assert.deepEqual(run.input, { startUrls: [{ url: 'https://www.youtube.com/@SaidWho/videos' }], maxResults: 50, maxResultsShorts: 0, maxResultStreams: 0, sortVideosBy: 'NEWEST' });
   // Paging and details come from the cache: no further runs.
   const first = await api.apifyYouTube('playlistItems', { part: 'contentDetails', playlistId: `UU${CHANNEL.slice(2)}`, maxResults: '20' }, TOKEN, apify.fetchImpl);
