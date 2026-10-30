@@ -105,13 +105,14 @@ export const YouTubeChannelRef: React.FC<YouTubeChannelRefProps> = ({
   });
   const [configured, setConfigured] = useState<boolean>(true);
 
+  // Fork: re-checked on open so a key added at runtime also refreshes the lookup source and its deadline.
   useEffect(() => {
     let cancelled = false;
     isYouTubeConfigured().then((ok) => {
       if (!cancelled) setConfigured(ok);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;

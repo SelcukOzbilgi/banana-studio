@@ -217,7 +217,10 @@ export const resolveChannel = async (input: string): Promise<YouTubeChannel> => 
       maxResults: '1',
     });
     if (!search.items?.length) throw new Error('Channel not found');
-    return resolveChannel(`https://youtube.com/channel/${search.items[0].snippet.channelId}`);
+    const foundId = search.items[0].snippet.channelId;
+    // The same ID would look up the same empty channel again, forever.
+    if (parsed.type === 'channelId' && foundId === parsed.value) throw new Error('Channel not found');
+    return resolveChannel(`https://youtube.com/channel/${foundId}`);
   }
 
   const ch = data.items[0];

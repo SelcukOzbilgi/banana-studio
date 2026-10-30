@@ -27,7 +27,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!request?.endpoint || !ALLOWED_ENDPOINTS.has(request.endpoint)) return res.status(400).json({ error: `Unsupported endpoint: ${request?.endpoint}` });
     const params = Object.fromEntries(Object.entries(request.params && typeof request.params === 'object' ? request.params : {}).filter(([, value]) => typeof value === 'string')) as Record<string, string>;
     try { return res.status(200).json(await apifyYouTube(request.endpoint, params, apifyToken)); }
-    catch (error) { return res.status(error instanceof ApifyError ? error.status : 502).json({ error: error instanceof ApifyError ? error.message : 'Apify YouTube lookup failed.' }); }
+    catch (error) {
+      if (error instanceof ApifyError) return res.status(error.status).json({ error: error.message });
+      // The token is only in a request header, never in an error message.
+      console.error('Apify YouTube lookup failed:', (error as Error)?.message || 'unknown error');
+      return res.status(502).json({ error: 'Apify YouTube lookup failed.' });
+    }
   }
 
   const apiKey = process.env.YOUTUBE_API_KEY;

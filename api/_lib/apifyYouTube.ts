@@ -18,7 +18,7 @@ type FetchLike = typeof fetch;
 
 export class ApifyError extends Error { constructor(message: string, readonly status = 502) { super(message); } }
 
-type ApifyVideo = { id?: string; title?: string; text?: string; hashtags?: string[]; channelName?: string; channelId?: string; channelAvatarUrl?: string;
+type ApifyVideo = { id?: string; title?: string; text?: string; hashtags?: string[]; channelName?: string; channelUsername?: string; channelId?: string; channelAvatarUrl?: string;
   date?: string; duration?: string; viewCount?: number; thumbnailUrl?: string; type?: string };
 type Cached<T> = { value: T; at: number };
 const channels = new Map<string, Cached<{ id: string; title: string; avatar: string; videoIds: string[] }>>();
@@ -26,6 +26,15 @@ const channelInputs = new Map<string, Cached<string | null>>();
 /** null = Apify returned nothing for this video (negative cache). */
 const videos = new Map<string, Cached<ApifyVideo | null>>();
 const spent: { at: number; items: number }[] = [];
+/** Lookups in progress: a repeated identical lookup joins the running paid run instead of starting another. */
+const inflight = new Map<string, Promise<unknown>>();
+const once = <T>(key: string, run: () => Promise<T>): Promise<T> => {
+  const running = inflight.get(key);
+  if (running) return running as Promise<T>;
+  const started = run().finally(() => inflight.delete(key));
+  inflight.set(key, started);
+  return started;
+};
 const isFresh = <T>(entry: Cached<T> | undefined): entry is Cached<T> => !!entry && Date.now() - entry.at < CACHE_TTL_MS;
 const fresh = <T>(entry: Cached<T> | undefined) => isFresh(entry) ? entry.value : undefined;
 const put = <K, T>(map: Map<K, Cached<T>>, key: K, value: T, limit = MAX_CACHED_ENTRIES) => {
@@ -70,7 +79,12 @@ async function runActor(token: string, input: Record<string, unknown>, maxItems:
   try {
     response = await fetchImpl(url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(170_000),
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
-  } catch { throw new ApifyError('Apify did not answer in time. Try again; nothing was retried automatically.', 504); }
+  } catch (error) {
+    const name = (error as Error)?.name;
+    if (name === 'TimeoutError' || name === 'AbortError') throw new ApifyError('Apify did not answer in time. Try again; nothing was retried automatically.', 504);
+    console.error('Apify request failed:', (error as Error)?.message || 'unknown error');
+    throw new ApifyError('Apify could not be reached.', 502);
+  }
   const data: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const message = typeof (data as any)?.error?.message === 'string' ? (data as any).error.message.replace(/[\u0000-\u001f]+/g, ' ').slice(0, 200) : '';
@@ -82,11 +96,16 @@ async function runActor(token: string, input: Record<string, unknown>, maxItems:
   return (data as ApifyVideo[]).filter(item => item && typeof item.id === 'string' && /^[a-zA-Z0-9_-]{11}$/.test(item.id));
 }
 
+const nameKey = (value: unknown) => typeof value === 'string' ? value.normalize('NFC').replace(/^@/, '').replace(/\s+/g, '').toLowerCase() : '';
+const sameName = (query: string) => { const wanted = nameKey(query); return (value: unknown) => !!wanted && nameKey(value) === wanted; };
 const remember = (items: ApifyVideo[]) => { for (const item of items) put(videos, item.id!, item); };
 const channelUrl = (params: Record<string, string>) => {
   if (params.id && /^UC[a-zA-Z0-9_-]{10,40}$/.test(params.id)) return { key: `id:${params.id}`, url: `https://www.youtube.com/channel/${params.id}/videos` };
-  const handle = (params.forHandle || '').replace(/^@/, '');
-  if (handle && /^[a-zA-Z0-9_.-]{1,100}$/.test(handle)) return { key: `handle:${handle.toLowerCase()}`, url: `https://www.youtube.com/@${handle}/videos` };
+  // Handles may be non-ASCII ("@çiğköfte") and arrive percent-encoded from a pasted URL.
+  let handle = params.forHandle || '';
+  try { handle = decodeURIComponent(handle); } catch { /* keep as typed; validated below */ }
+  handle = handle.normalize('NFC').replace(/^@/, '');
+  if (handle && /^[\p{L}\p{N}_.-]{1,100}$/u.test(handle)) return { key: `handle:${handle.toLowerCase()}`, url: `https://www.youtube.com/@${encodeURIComponent(handle)}/videos` };
   const user = params.forUsername || '';
   if (user && /^[a-zA-Z0-9_.-]{1,100}$/.test(user)) return { key: `user:${user.toLowerCase()}`, url: `https://www.youtube.com/user/${user}/videos` };
   return null;
@@ -108,6 +127,7 @@ export async function apifyYouTube(endpoint: string, params: Record<string, stri
   if (endpoint === 'channels') {
     const target = channelUrl(params);
     if (!target) throw new ApifyError('Unsupported channel lookup.', 400);
+    return once(`channels:${target.key}`, async () => {
     const known = channelInputs.get(target.key);
     // A fresh null is a cached "not found": no second paid run.
     if (isFresh(known) && known.value === null) return { items: [] };
@@ -119,18 +139,22 @@ export async function apifyYouTube(endpoint: string, params: Record<string, stri
     if (!channel) return { items: [] };
     return { items: [{ id: channel.id, snippet: { title: channel.title, thumbnails: { default: { url: channel.avatar } } },
       contentDetails: { relatedPlaylists: { uploads: `UU${channel.id.slice(2)}` } } }] };
+    });
   }
   if (endpoint === 'playlistItems') {
     const playlist = params.playlistId || '';
     if (!/^UU[a-zA-Z0-9_-]{10,40}$/.test(playlist)) throw new ApifyError('Only channel upload lists are supported with Apify.', 400);
     const id = `UC${playlist.slice(2)}`;
     // After the cache expires (or a restart) one run reloads the channel; a known miss does not run again.
-    const known = channelInputs.get(`id:${id}`);
-    let channel = fresh(channels.get(id));
-    if (!channel && !(isFresh(known) && known.value === null)) {
-      channel = await loadChannel(token, `https://www.youtube.com/channel/${id}/videos`, fetchImpl) ?? undefined;
-      if (!channel) put(channelInputs, `id:${id}`, null);
-    }
+    const channel = await once(`playlist:${id}`, async () => {
+      const known = channelInputs.get(`id:${id}`);
+      let loaded = fresh(channels.get(id));
+      if (!loaded && !(isFresh(known) && known.value === null)) {
+        loaded = await loadChannel(token, `https://www.youtube.com/channel/${id}/videos`, fetchImpl) ?? undefined;
+        if (!loaded) put(channelInputs, `id:${id}`, null);
+      }
+      return loaded;
+    });
     const ids = channel?.videoIds ?? [];
     const offset = /^apify:\d{1,4}$/.test(params.pageToken || '') ? Number(params.pageToken.slice(6)) : 0;
     const size = Math.max(1, Math.min(50, Number(params.maxResults) || 50));
@@ -149,13 +173,17 @@ export async function apifyYouTube(endpoint: string, params: Record<string, stri
   if (endpoint === 'search') {
     const q = (params.q || '').trim().slice(0, 100);
     if (!q || params.type !== 'channel') throw new ApifyError('Only channel search is supported with Apify.', 400);
-    const key = `search:${q.toLowerCase()}`, known = channelInputs.get(key);
-    let channelId = isFresh(known) ? known.value : undefined;
-    if (channelId === undefined) {
+    const key = `search:${q.toLowerCase()}`;
+    const channelId = await once(key, async () => {
+      const known = channelInputs.get(key);
+      if (isFresh(known)) return known.value;
       const items = await runActor(token, { searchQueries: [q], maxResults: 1, maxResultsShorts: 0, maxResultStreams: 0 }, 1, fetchImpl);
-      channelId = items.find(item => item.channelId)?.channelId ?? null;
-      put(channelInputs, key, channelId);
-    }
+      // The top search hit is a video; accept its channel only when it is the channel asked for, not any channel that matched the words.
+      const wanted = sameName(q);
+      const found = items.find(item => item.channelId && (wanted(item.channelName) || wanted(item.channelUsername)))?.channelId ?? null;
+      put(channelInputs, key, found);
+      return found;
+    });
     return { items: channelId ? [{ snippet: { channelId } }] : [] };
   }
   throw new ApifyError(`Unsupported endpoint: ${endpoint}`, 400);

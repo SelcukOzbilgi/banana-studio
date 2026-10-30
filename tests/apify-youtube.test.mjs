@@ -138,3 +138,50 @@ test('misses are cached and an hourly item budget stops runaway paid runs', asyn
   assert.equal(apify.calls.length, handles.length);
   api.clearApifyCache();
 });
+
+test('channel search accepts only a hit from the channel asked for', async () => {
+  api.clearApifyCache();
+  let apify = fakeApify(() => Response.json([video(1, { channelName: 'Unrelated Cooking', channelUsername: 'cookingdaily', channelId: 'UCzyxwvutsrqponmlkjihgfe' })]));
+  assert.deepEqual(await api.apifyYouTube('search', { q: 'SaidWho', type: 'channel' }, TOKEN, apify.fetchImpl), { items: [] });
+  api.clearApifyCache();
+  apify = fakeApify(() => Response.json([video(1, { channelName: 'Said Who', channelUsername: 'SaidWho' })]));
+  assert.deepEqual(await api.apifyYouTube('search', { q: 'saidwho', type: 'channel' }, TOKEN, apify.fetchImpl), { items: [{ snippet: { channelId: CHANNEL } }] });
+  api.clearApifyCache();
+});
+
+test('concurrent identical lookups share one paid run', async () => {
+  api.clearApifyCache();
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  const apify = fakeApify(async () => { await gate; return Response.json([video(1)]); });
+  const lookups = [api.apifyYouTube('channels', { forHandle: '@SaidWho' }, TOKEN, apify.fetchImpl), api.apifyYouTube('channels', { forHandle: '@saidwho' }, TOKEN, apify.fetchImpl)];
+  const playlists = [0, 1].map(() => api.apifyYouTube('playlistItems', { playlistId: 'UUyyyyyyyyyyyyyyyyyyyyyy' }, TOKEN, apify.fetchImpl));
+  release();
+  const [a, b] = await Promise.all(lookups); await Promise.all(playlists);
+  assert.deepEqual(a, b); assert.equal(a.items[0].id, CHANNEL);
+  assert.equal(apify.calls.length, 2, 'one run for the handle, one for the playlist');
+  api.clearApifyCache();
+});
+
+test('non-ASCII handles are decoded, validated and sent encoded', async () => {
+  api.clearApifyCache();
+  const apify = fakeApify(() => Response.json([video(1, { channelName: 'Çiğköfte Usta' })]));
+  const raw = await api.apifyYouTube('channels', { forHandle: '@çiğköfteusta' }, TOKEN, apify.fetchImpl);
+  assert.equal(raw.items[0].snippet.title, 'Çiğköfte Usta');
+  assert.equal(apify.calls[0].input.startUrls[0].url, `https://www.youtube.com/@${encodeURIComponent('çiğköfteusta')}/videos`);
+  await api.apifyYouTube('channels', { forHandle: `@${encodeURIComponent('ÇiğköfteUsta')}` }, TOKEN, apify.fetchImpl);
+  assert.equal(apify.calls.length, 1, 'encoded and raw forms share one cache entry');
+  await assert.rejects(api.apifyYouTube('channels', { forHandle: '@bad/handle' }, TOKEN, apify.fetchImpl), /Unsupported channel lookup/);
+  api.clearApifyCache();
+});
+
+test('a timeout and an unreachable Apify are reported differently', async () => {
+  api.clearApifyCache();
+  const oldError = console.error; const logged = []; console.error = (...args) => logged.push(args.join(' '));
+  try {
+    let apify = fakeApify(() => { throw new DOMException('timed out', 'TimeoutError'); });
+    await assert.rejects(api.apifyYouTube('channels', { forHandle: '@t1' }, TOKEN, apify.fetchImpl), error => error.status === 504 && /did not answer in time/.test(error.message));
+    apify = fakeApify(() => { throw new TypeError('getaddrinfo ENOTFOUND api.apify.com'); });
+    await assert.rejects(api.apifyYouTube('channels', { forHandle: '@t2' }, TOKEN, apify.fetchImpl), error => error.status === 502 && /could not be reached/.test(error.message));
+    assert.ok(logged.some(line => line.includes('ENOTFOUND'))); assert.ok(!logged.join('\n').includes(TOKEN));
+  } finally { console.error = oldError; api.clearApifyCache(); }
+});
