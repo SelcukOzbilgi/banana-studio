@@ -10,7 +10,7 @@ const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const outdir = path.join(root, '.build/test-bundles'); fs.mkdirSync(outdir, { recursive: true });
 const outfile = path.join(outdir, `apify-${process.pid}.mjs`);
 await build({ stdin: { resolveDir: root, loader: 'js', contents: `
-export { apifyYouTube, toIsoDuration, toYouTubeVideo, clearApifyCache, APIFY_CHANNEL_VIDEOS } from './api/_lib/apifyYouTube.ts';
+export { apifyYouTube, toIsoDuration, toYouTubeVideo, clearApifyCache, APIFY_CHANNEL_VIDEOS, APIFY_HOURLY_ITEM_BUDGET } from './api/_lib/apifyYouTube.ts';
 export { default as youtube } from './api/youtube.ts';
 export { default as youtubeStatus } from './api/youtube-status.ts';
 export { LOCAL_AUTH, setWorkspace } from './desktop/server/context.mjs';` },
@@ -79,7 +79,7 @@ test('unknown channels return no items, channel search maps the first result, er
   let apify = fakeApify(() => Response.json([]));
   assert.deepEqual(await api.apifyYouTube('channels', { id: 'UCzzzzzzzzzzzzzzzzzzzzzz' }, TOKEN, apify.fetchImpl), { items: [] });
   apify = fakeApify(() => Response.json([video(1)]));
-  assert.deepEqual(await api.apifyYouTube('search', { part: 'snippet', q: 'said who', type: 'channel', maxResults: '1' }, TOKEN, apify.fetchImpl), { items: [{ snippet: { channelId: CHANNEL, title: 'Said Who' } }] });
+  assert.deepEqual(await api.apifyYouTube('search', { part: 'snippet', q: 'said who', type: 'channel', maxResults: '1' }, TOKEN, apify.fetchImpl), { items: [{ snippet: { channelId: CHANNEL } }] });
   assert.deepEqual(apify.calls[0].input.searchQueries, ['said who']);
   await assert.rejects(api.apifyYouTube('search', { q: 'x', type: 'video' }, TOKEN, apify.fetchImpl), /Only channel search/);
   await assert.rejects(api.apifyYouTube('playlistItems', { playlistId: 'PL123' }, TOKEN, apify.fetchImpl), /upload lists/);
@@ -120,4 +120,21 @@ test('the proxy uses Apify when the token exists and the Google key path otherwi
     });
     assert.deepEqual(hosts, ['api.apify.com', 'www.googleapis.com']);
   } finally { globalThis.fetch = oldFetch; }
+});
+
+test('misses are cached and an hourly item budget stops runaway paid runs', async () => {
+  api.clearApifyCache();
+  let apify = fakeApify(() => Response.json([]));
+  for (let i = 0; i < 3; i++) await api.apifyYouTube('channels', { forHandle: '@nobody' }, TOKEN, apify.fetchImpl);
+  for (let i = 0; i < 3; i++) await api.apifyYouTube('playlistItems', { playlistId: 'UUzzzzzzzzzzzzzzzzzzzzzz' }, TOKEN, apify.fetchImpl);
+  for (let i = 0; i < 3; i++) assert.deepEqual(await api.apifyYouTube('videos', { id: 'aaaaaaaaaaa' }, TOKEN, apify.fetchImpl), { items: [] });
+  for (let i = 0; i < 3; i++) await api.apifyYouTube('search', { q: 'nobody', type: 'channel' }, TOKEN, apify.fetchImpl);
+  assert.equal(apify.calls.length, 4, 'one run per distinct miss');
+  api.clearApifyCache();
+  apify = fakeApify(() => Response.json([]));
+  const handles = Array.from({ length: Math.floor(api.APIFY_HOURLY_ITEM_BUDGET / api.APIFY_CHANNEL_VIDEOS) }, (_, i) => `@c${i}`);
+  for (const forHandle of handles) await api.apifyYouTube('channels', { forHandle }, TOKEN, apify.fetchImpl);
+  await assert.rejects(api.apifyYouTube('channels', { forHandle: '@one-more' }, TOKEN, apify.fetchImpl), /hourly Apify lookup budget.*no request was sent/);
+  assert.equal(apify.calls.length, handles.length);
+  api.clearApifyCache();
 });

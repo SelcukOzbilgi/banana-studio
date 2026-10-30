@@ -11,6 +11,9 @@ export const APIFY_CHANNEL_VIDEOS = 50;
 const PRICE_CAP_PER_ITEM_USD = 0.005;
 const CACHE_TTL_MS = 30 * 60_000;
 const MAX_CACHED_CHANNELS = 40;
+const MAX_CACHED_ENTRIES = 5000;
+/** Paid dataset items allowed per rolling hour in this app process (~$2 on the FREE tier); guards against loops. */
+export const APIFY_HOURLY_ITEM_BUDGET = 500;
 type FetchLike = typeof fetch;
 
 export class ApifyError extends Error { constructor(message: string, readonly status = 502) { super(message); } }
@@ -20,9 +23,23 @@ type ApifyVideo = { id?: string; title?: string; text?: string; hashtags?: strin
 type Cached<T> = { value: T; at: number };
 const channels = new Map<string, Cached<{ id: string; title: string; avatar: string; videoIds: string[] }>>();
 const channelInputs = new Map<string, Cached<string | null>>();
-const videos = new Map<string, Cached<ApifyVideo>>();
-const fresh = <T>(entry: Cached<T> | undefined) => entry && Date.now() - entry.at < CACHE_TTL_MS ? entry.value : undefined;
-export const clearApifyCache = () => { channels.clear(); channelInputs.clear(); videos.clear(); };
+/** null = Apify returned nothing for this video (negative cache). */
+const videos = new Map<string, Cached<ApifyVideo | null>>();
+const spent: { at: number; items: number }[] = [];
+const isFresh = <T>(entry: Cached<T> | undefined): entry is Cached<T> => !!entry && Date.now() - entry.at < CACHE_TTL_MS;
+const fresh = <T>(entry: Cached<T> | undefined) => isFresh(entry) ? entry.value : undefined;
+const put = <K, T>(map: Map<K, Cached<T>>, key: K, value: T, limit = MAX_CACHED_ENTRIES) => {
+  map.delete(key); while (map.size >= limit) map.delete(map.keys().next().value!);
+  map.set(key, { value, at: Date.now() });
+};
+export const clearApifyCache = () => { channels.clear(); channelInputs.clear(); videos.clear(); spent.length = 0; };
+const reserveBudget = (items: number) => {
+  const now = Date.now();
+  while (spent.length && now - spent[0].at > 3600_000) spent.shift();
+  const used = spent.reduce((total, entry) => total + entry.items, 0);
+  if (used + items > APIFY_HOURLY_ITEM_BUDGET) throw new ApifyError(`The hourly Apify lookup budget (${APIFY_HOURLY_ITEM_BUDGET} videos) is used up. Try again later; no request was sent.`, 429);
+  spent.push({ at: now, items });
+};
 
 /** "1:02:03" / "00:03:27" / "45" → ISO 8601 "PT1H2M3S", the format the client parses. */
 export const toIsoDuration = (value: unknown): string => {
@@ -44,6 +61,7 @@ export const toYouTubeVideo = (item: ApifyVideo) => ({
 });
 
 async function runActor(token: string, input: Record<string, unknown>, maxItems: number, fetchImpl: FetchLike = fetch): Promise<ApifyVideo[]> {
+  reserveBudget(maxItems);
   const url = new URL(RUN_URL);
   url.searchParams.set('timeout', '150'); url.searchParams.set('maxItems', String(maxItems));
   url.searchParams.set('maxTotalChargeUsd', (maxItems * PRICE_CAP_PER_ITEM_USD + 0.01).toFixed(2));
@@ -64,7 +82,7 @@ async function runActor(token: string, input: Record<string, unknown>, maxItems:
   return (data as ApifyVideo[]).filter(item => item && typeof item.id === 'string' && /^[a-zA-Z0-9_-]{11}$/.test(item.id));
 }
 
-const remember = (items: ApifyVideo[]) => { const at = Date.now(); for (const item of items) videos.set(item.id!, { value: item, at }); };
+const remember = (items: ApifyVideo[]) => { for (const item of items) put(videos, item.id!, item); };
 const channelUrl = (params: Record<string, string>) => {
   if (params.id && /^UC[a-zA-Z0-9_-]{10,40}$/.test(params.id)) return { key: `id:${params.id}`, url: `https://www.youtube.com/channel/${params.id}/videos` };
   const handle = (params.forHandle || '').replace(/^@/, '');
@@ -81,8 +99,8 @@ async function loadChannel(token: string, url: string, fetchImpl?: FetchLike) {
   if (!first) return null;
   remember(items);
   const channel = { id: first.channelId!, title: first.channelName || '', avatar: first.channelAvatarUrl || '', videoIds: items.filter(item => item.channelId === first.channelId).map(item => item.id!) };
-  if (channels.size >= MAX_CACHED_CHANNELS) channels.delete(channels.keys().next().value!);
-  channels.set(channel.id, { value: channel, at: Date.now() });
+  put(channels, channel.id, channel, MAX_CACHED_CHANNELS);
+  put(channelInputs, `id:${channel.id}`, channel.id);
   return channel;
 }
 
@@ -90,11 +108,13 @@ export async function apifyYouTube(endpoint: string, params: Record<string, stri
   if (endpoint === 'channels') {
     const target = channelUrl(params);
     if (!target) throw new ApifyError('Unsupported channel lookup.', 400);
-    let id = fresh(channelInputs.get(target.key));
-    let channel = id ? fresh(channels.get(id)) : undefined;
+    const known = channelInputs.get(target.key);
+    // A fresh null is a cached "not found": no second paid run.
+    if (isFresh(known) && known.value === null) return { items: [] };
+    let channel = isFresh(known) && known.value ? fresh(channels.get(known.value)) : undefined;
     if (!channel) {
       channel = await loadChannel(token, target.url, fetchImpl) ?? undefined;
-      channelInputs.set(target.key, { value: channel?.id ?? null, at: Date.now() });
+      put(channelInputs, target.key, channel?.id ?? null);
     }
     if (!channel) return { items: [] };
     return { items: [{ id: channel.id, snippet: { title: channel.title, thumbnails: { default: { url: channel.avatar } } },
@@ -104,7 +124,13 @@ export async function apifyYouTube(endpoint: string, params: Record<string, stri
     const playlist = params.playlistId || '';
     if (!/^UU[a-zA-Z0-9_-]{10,40}$/.test(playlist)) throw new ApifyError('Only channel upload lists are supported with Apify.', 400);
     const id = `UC${playlist.slice(2)}`;
-    const channel = fresh(channels.get(id)) ?? await loadChannel(token, `https://www.youtube.com/channel/${id}/videos`, fetchImpl);
+    // After the cache expires (or a restart) one run reloads the channel; a known miss does not run again.
+    const known = channelInputs.get(`id:${id}`);
+    let channel = fresh(channels.get(id));
+    if (!channel && !(isFresh(known) && known.value === null)) {
+      channel = await loadChannel(token, `https://www.youtube.com/channel/${id}/videos`, fetchImpl) ?? undefined;
+      if (!channel) put(channelInputs, `id:${id}`, null);
+    }
     const ids = channel?.videoIds ?? [];
     const offset = /^apify:\d{1,4}$/.test(params.pageToken || '') ? Number(params.pageToken.slice(6)) : 0;
     const size = Math.max(1, Math.min(50, Number(params.maxResults) || 50));
@@ -113,15 +139,24 @@ export async function apifyYouTube(endpoint: string, params: Record<string, stri
   }
   if (endpoint === 'videos') {
     const ids = (params.id || '').split(',').map(value => value.trim()).filter(value => /^[a-zA-Z0-9_-]{11}$/.test(value)).slice(0, 50);
-    const missing = ids.filter(id => !fresh(videos.get(id)));
-    if (missing.length) remember(await runActor(token, { startUrls: missing.map(id => ({ url: `https://www.youtube.com/watch?v=${id}` })), maxResults: missing.length, maxResultsShorts: 0, maxResultStreams: 0 }, missing.length, fetchImpl));
+    const missing = ids.filter(id => !isFresh(videos.get(id)));
+    if (missing.length) {
+      remember(await runActor(token, { startUrls: missing.map(id => ({ url: `https://www.youtube.com/watch?v=${id}` })), maxResults: missing.length, maxResultsShorts: 0, maxResultStreams: 0 }, missing.length, fetchImpl));
+      for (const id of missing) if (!isFresh(videos.get(id))) put(videos, id, null);
+    }
     return { items: ids.map(id => fresh(videos.get(id))).filter((item): item is ApifyVideo => !!item).map(toYouTubeVideo) };
   }
   if (endpoint === 'search') {
     const q = (params.q || '').trim().slice(0, 100);
     if (!q || params.type !== 'channel') throw new ApifyError('Only channel search is supported with Apify.', 400);
-    const items = await runActor(token, { searchQueries: [q], maxResults: 1, maxResultsShorts: 0, maxResultStreams: 0 }, 1, fetchImpl);
-    return { items: items.filter(item => item.channelId).slice(0, 1).map(item => ({ snippet: { channelId: item.channelId, title: item.channelName || '' } })) };
+    const key = `search:${q.toLowerCase()}`, known = channelInputs.get(key);
+    let channelId = isFresh(known) ? known.value : undefined;
+    if (channelId === undefined) {
+      const items = await runActor(token, { searchQueries: [q], maxResults: 1, maxResultsShorts: 0, maxResultStreams: 0 }, 1, fetchImpl);
+      channelId = items.find(item => item.channelId)?.channelId ?? null;
+      put(channelInputs, key, channelId);
+    }
+    return { items: channelId ? [{ snippet: { channelId } }] : [] };
   }
   throw new ApifyError(`Unsupported endpoint: ${endpoint}`, 400);
 }
