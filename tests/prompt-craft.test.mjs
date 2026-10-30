@@ -81,3 +81,22 @@ test('product shot Standard adds nothing; other modes add one guidance block', (
     assert.doesNotMatch(m.buildForkTextGuidance({ ...context, ...other, settings: { productShotMode: 'studio' } }), /PRODUCT SHOT MODE/);
   }
 });
+
+test('no-text and text requests read Turkish capitals and word boundaries', () => {
+  for (const brief of ['Kahve fincanı, YAZI YOK', 'YAZISIZ bir afiş', 'METİNSİZ ürün fotoğrafı', 'Yazı yok, sade arka plan']) {
+    assert.equal(m.requestsNoText(brief), true, brief);
+    assert.equal(m.isTextBearingDesign('simple', brief), false, brief);
+  }
+  assert.equal(m.requestsNoText('WITHOUT ANY TEXT'), true);
+  for (const brief of ['Yazılım ekibi ofiste çalışıyor', 'Metin parkta kahve içiyor', 'Overlay the logo on the bottle'])
+    assert.equal(m.isTextBearingDesign('simple', brief), false, brief);
+  for (const brief of ['Üstünde büyük bir yazı olsun', 'Afişin yazısı kırmızı', 'BAŞLIK ortada', 'Kısa bir başlığı olsun', 'METİN sağda', 'Add a text overlay', 'Bold HEADLINE on top', 'Sloganlı bir kampanya görseli'])
+    assert.equal(m.isTextBearingDesign('simple', brief), true, brief);
+});
+
+test('an inch mark after a digit never opens a quote; typographic quotes pair with their own closers', () => {
+  assert.deepEqual(m.extractQuotedText('27" monitör kampanyası, üstünde "İNDİRİM" yazsın'), ['İNDİRİM']);
+  assert.deepEqual(m.extractQuotedText('27" ve 32" ekranlar'), []);
+  assert.deepEqual(m.extractQuotedText('Poster “ŞİMDİ AL” and «ÇOK İYİ» and „GÜZEL“'), ['ŞİMDİ AL', 'ÇOK İYİ', 'GÜZEL']);
+  assert.match(m.buildExactTextSpellingRule('55" TV, başlık "İNDİRİM"'), /"İNDİRİM" = İ-N-D-İ-R-İ-M/);
+});

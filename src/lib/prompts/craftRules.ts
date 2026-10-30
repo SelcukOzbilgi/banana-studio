@@ -5,8 +5,10 @@
 import type { BrainstormCategory } from '../../types.js';
 
 // Straight and typographic double quotes. Single quotes are skipped on purpose:
-// Turkish uses apostrophes inside words ("İstanbul'da").
-const QUOTED = /["“”„«»]([^"“”„«»\n]{1,160})["“”„«»]/g;
+// Turkish uses apostrophes inside words ("İstanbul'da"). A straight quote right
+// after a digit is an inch mark (27" monitor), never an opener; typographic
+// openers pair with their own closers.
+const QUOTED = /(?<!\d)"([^"“”\n]{1,160})["”]|“([^"“”\n]{1,160})["”]|„([^"“”„\n]{1,160})[“”]|«([^«»\n]{1,160})»|»([^«»\n]{1,160})«/g;
 const REFERENCE_TOKEN = /@REFERENCE\[[^\]\n]*\]/g;
 const TURKISH = /[İıŞşĞğÜüÖöÇç]/;
 const NON_ASCII_LETTER = /[^\u0000-\u007f]/;
@@ -19,7 +21,7 @@ export const extractQuotedText = (...sources: (string | undefined)[]): string[] 
   for (const source of sources) {
     if (!source) continue;
     for (const match of source.replace(REFERENCE_TOKEN, ' ').matchAll(QUOTED)) {
-      const text = match[1].trim();
+      const text = (match.slice(1).find(group => group !== undefined) ?? '').trim();
       if (text && !found.includes(text)) found.push(text);
     }
   }
@@ -65,13 +67,22 @@ export const buildExactTextSpellingRule = (...sources: (string | undefined)[]): 
 };
 
 const NO_TEXT = /\b(?:no text|without (?:any )?text|text-?free|no words|no lettering|no typography|no captions?)\b|yazısız|yazı olmadan|yazı olmasın|yazı yok|metinsiz|metin olmadan|metin yok/i;
-const TEXT_REQUEST = /\b(?:text|headline|caption|typography|lettering|slogan|tagline|title text|overlay)\b|yazı|başlık|metin|slogan/i;
+const TEXT_REQUEST = /\b(?:text|headline|caption|typography|lettering|slogan|tagline|title text|text overlay)\b/i;
+// Turkish words with common suffixes, bounded by letters so "yazılım" (software) does not count.
+const TR_TEXT_REQUEST = /(?<!\p{L})(?:yaz[ıi](?:s[ıi]|l[ıi]|y[ıi]|yla|da|n[ıi]n|lar|lar[ıi])?|başl[ıi](?:k|ğ[ıi]|kl[ıi]|kla|klar|klar[ıi])|slogan(?:[ıi]|l[ıi])?)(?!\p{L})/iu;
+// "metin" is also a first name, so a capitalised "Metin" is not a text request (all-caps METİN is).
+const TR_METIN = /(?<!\p{L})(?:met[iı]n(?:l[iı]|le|ler|ler[iı]|de)?|metn[iı])(?!\p{L})/u;
+/** /i does not fold Turkish İ/ı, so also test the Turkish lower-case form. English
+ * words are tested on the original too, since Turkish lower-casing turns I into ı. */
+const turkishLower = (text: string) => text.toLocaleLowerCase('tr');
+const lowerCapsWords = (text: string) => text.replace(/\p{L}{2,}/gu, word => word === word.toLocaleUpperCase('tr') ? turkishLower(word) : word);
 
-export const requestsNoText = (brief: string): boolean => NO_TEXT.test(brief);
+export const requestsNoText = (brief: string): boolean => NO_TEXT.test(brief) || NO_TEXT.test(turkishLower(brief));
+const requestsText = (brief: string): boolean => TEXT_REQUEST.test(brief) || TR_TEXT_REQUEST.test(turkishLower(brief)) || TR_METIN.test(lowerCapsWords(brief));
 /** Designs whose layout should plan for overlay text. A no-text request always wins. */
 export const isTextBearingDesign = (category: BrainstormCategory | undefined, brief: string, youtube = false): boolean =>
   !requestsNoText(brief) && (youtube || category === 'youtube_thumbnail' || category === 'social_media'
-    || extractQuotedText(brief).length > 0 || TEXT_REQUEST.test(brief));
+    || extractQuotedText(brief).length > 0 || requestsText(brief));
 
 export const buildOverlayTextRule = (options: { youtube: boolean; wide: boolean; exactCopy: boolean }): string => [
   'OVERLAY TEXT LAYOUT',
