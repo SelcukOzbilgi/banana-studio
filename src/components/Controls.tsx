@@ -1,5 +1,5 @@
 import { useProviderRoute, ProviderRouteControl } from './ProviderRoutingSettings';
-import { seedanceProviderError } from '../lib/video/seedanceProviders';
+import { seedanceProviderError, WIRO_SEEDANCE_TIPS } from '../lib/video/seedanceProviders';
 import { SavedReferenceImages } from './SavedReferenceImages';
 import { getClipboardImages } from '../lib/references/clipboardImages';
 import { displayReferencePrompt, storeReferencePrompt } from '../lib/references/dynamicReferences';
@@ -2508,6 +2508,7 @@ export const Controls: React.FC<ControlsProps> = ({
 
         {hasComposerMessages && <div role="region" aria-label="Generation messages" data-testid="generation-messages" className="space-y-2 px-1">
           <ProviderRouteControl model={config.mode === 'video' ? selectedVideoModel : config.imageModel} compact showError={false} />
+          {isVideoMode && providerRoute.provider === 'wiro' && <p className="px-1 text-[11px] leading-5 text-gray-400">{WIRO_SEEDANCE_TIPS} Billed at finish; the actual cost appears in the video details.</p>}
           {modelInputError && <p role={sunburstError ? 'alert' : 'status'} className="px-1 text-xs leading-5 text-amber-300">{modelInputError}</p>}
           {generationError && generationError !== modelInputError && <p role="alert" className="px-1 text-xs leading-5 text-red-400">{generationError}</p>}
           {attachmentError && <div role="alert" className="flex items-start justify-between gap-3 px-1 text-xs leading-5 text-red-400"><span className="whitespace-pre-line">{attachmentError}</span><button type="button" aria-label="Dismiss attachment message" onClick={() => setAttachmentError(null)} className="shrink-0 rounded p-1 text-gray-400 hover:text-white"><X className="h-3.5 w-3.5" /></button></div>}

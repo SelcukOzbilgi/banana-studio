@@ -928,10 +928,10 @@ const AuthorizedWorkspace: React.FC<{
         const { taskId, endpoint, queueEndpoint, cost, mode, referenceImages, referenceVideos, referenceAudios } = await createVideoTask(config,{id:videoId});
 
         // Update DB row with the real task_id now that we have it
-        await updateVideoStatus(videoId, 'processing', {
+        const statusSaved = await updateVideoStatus(videoId, 'processing', {
           referenceImages,
           metadata: {
-            generationCost: cost, providerModel: endpoint, generationProvider: taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink',
+            generationCost: cost, providerModel: endpoint, generationProvider: taskId.startsWith('bs_wiro_') ? 'wiro' : taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink',
             referenceVideos,
             referenceAudios,
             falEndpoint: endpoint,
@@ -941,9 +941,11 @@ const AuthorizedWorkspace: React.FC<{
         h3MaxMode, h3MaxOptions: config.h3MaxOptions,
           },
         });
-        // Also store task_id
+        // Also store task_id. Fork (REVIEW Y4): a failed write is reported, not swallowed;
+        // the task ID is needed to recover a paid video after a restart.
         if (supabase) {
-          await supabase.from('generations').update({ task_id: taskId }).eq('id', videoId);
+          const { error: taskIdError } = await supabase.from('generations').update({ task_id: taskId }).eq('id', videoId);
+          if (taskIdError || !statusSaved) toast.warning('Video task not saved', `The provider accepted task ${taskId}, but it could not be saved to the gallery. Keep the app open until the video finishes; do not submit it again.`);
         }
 
         // Log as soon as EvoLink accepts/reserves credits for the task. The
@@ -956,7 +958,7 @@ const AuthorizedWorkspace: React.FC<{
         if (config.videoModel !== 'minimax-h3') logVideoUsage(config.prompt, 1, config, mode, cost);
 
         setGeneratedMedia(prev => prev.map(item =>
-          item.id === videoId ? { ...item, status: 'processing', taskId, generationProvider: taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink', falEndpoint: endpoint, falQueueEndpoint: queueEndpoint, generationCost: cost, referenceImages: referenceImages || item.referenceImages, referenceVideos, referenceAudios } : item
+          item.id === videoId ? { ...item, status: 'processing', taskId, generationProvider: taskId.startsWith('bs_wiro_') ? 'wiro' : taskId.startsWith('bs_openrouter_') ? 'openrouter' : taskId.startsWith('bs_fal_') || config.videoModel === 'minimax-h3' ? 'fal' : 'evolink', falEndpoint: endpoint, falQueueEndpoint: queueEndpoint, generationCost: cost, referenceImages: referenceImages || item.referenceImages, referenceVideos, referenceAudios } : item
         ));
 
         const videoResult = await pollVideoTask(taskId, (progress) => {

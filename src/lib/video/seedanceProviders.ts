@@ -22,6 +22,13 @@ export function seedanceProviderError(provider: AIProvider, body: SeedanceReques
     if (body.aspectRatio === 'adaptive') return 'Choose an aspect ratio for OpenRouter.';
     if (counts[0] > 9) return 'Use up to 9 image references with this OpenRouter route.';
   }
+  // Fork: Wiro routes, from Wiro's Seedance schemas (no video inputs, Edit or Extend).
+  if (provider === 'wiro') {
+    if (body.mode.startsWith('video_') || counts[1] || body.referenceEditMode) return 'Wiro Seedance supports text, first/last frames and image references. Choose fal.ai or EvoLink in AI settings for video references, Edit or Extend.';
+    if (body.duration === -1) return `Wiro needs a fixed duration (4–${newer ? 30 : 15} seconds). 5 seconds at 720p is the cheapest useful setting.`;
+    if (counts[2] && newer) return 'Seedance 2.5 on Wiro does not accept reference audio. Remove the audio or choose Seedance 2.0.';
+    if (counts[2] && (body.mode !== 'reference_to_video' || !counts[0])) return 'Reference audio on Wiro needs at least one reference image and cannot be combined with first/last frames.';
+  }
 }
 const referencePrompt = (prompt = '') => prompt.replace(/@(?:REF[_ ]?)?IMAGE[_ ]?(\d+)/gi, '@Image$1').replace(/@VIDEO[_ ]?(\d+)/gi, '@Video$1').replace(/@AUDIO[_ ]?(\d+)/gi, '@Audio$1');
 export function falSeedanceInput(body: SeedanceRequest) {
@@ -45,3 +52,6 @@ export function openRouterSeedanceInput(body: SeedanceRequest) {
     provider: { allow_fallbacks: false },
   };
 }
+
+/** Fork: short Wiro Seedance tips shown next to the video controls. */
+export const WIRO_SEEDANCE_TIPS = 'Wiro tips: with a start frame, describe only the motion; a locked camera loops best; 5 s at 720p is the cheap sweet spot; up to 2 Wiro videos run at once; failed tasks are not billed.';

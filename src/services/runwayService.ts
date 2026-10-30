@@ -995,6 +995,8 @@ export const createVideoTask = async (
     : cleanedPrompt;
   const body: Record<string, unknown> = {
         provider: selectedProvider, videoModel,
+        // Fork: lets the server save a Wiro task on this generation before replying.
+        ...(context?.id ? { generationId: context.id } : {}),
         mode,
         prompt: finalPrompt || undefined,
         duration: requestDuration,
@@ -1070,6 +1072,7 @@ const parseVideoActualCostUsd = (value: unknown): number | undefined => {
   return Number.isFinite(amount) && amount >= 0 ? amount : undefined;
 };
 
+const WIRO_VIDEO_POLL_WINDOW_MS = 45 * 60_000;
 export const pollVideoTask = async (
   taskId: string,
   onProgress?: (progress: number) => void,
@@ -1085,8 +1088,11 @@ export const pollVideoTask = async (
     endpoint?.startsWith('minimax/h3-max/') === true
     || effectiveQueueEndpoint === 'minimax/h3-max'
   );
-  const routed = taskId.startsWith('bs_fal_') || taskId.startsWith('bs_openrouter_');
-  const providerName = isH3 || taskId.startsWith('bs_fal_') ? 'fal.ai' : taskId.startsWith('bs_openrouter_') ? 'OpenRouter' : 'EvoLink';
+  const wiro = taskId.startsWith('bs_wiro_');
+  const routed = taskId.startsWith('bs_fal_') || taskId.startsWith('bs_openrouter_') || wiro;
+  const providerName = wiro ? 'Wiro' : isH3 || taskId.startsWith('bs_fal_') ? 'fal.ai' : taskId.startsWith('bs_openrouter_') ? 'OpenRouter' : 'EvoLink';
+  // Fork: bounded Wiro polling. The task ID stays saved and is checked again after refresh.
+  const pollDeadline = wiro ? Date.now() + WIRO_VIDEO_POLL_WINDOW_MS : Infinity;
   let consecutiveErrors = 0;
   const MAX_ERRORS = 5;
   let retryableStatusErrors = 0;
@@ -1142,7 +1148,9 @@ export const pollVideoTask = async (
       if (data.status === 'FAILED') throw new TerminalVideoTaskError(data.error || 'Video generation failed');
       if (data.status === 'CANCELLED') throw new TerminalVideoTaskError(data.error || 'Video generation was cancelled');
       onProgress?.(data.progress ?? 0);
+      if (Date.now() > pollDeadline) throw new RecoverableVideoTaskError('Wiro is still rendering this video. The task ID was saved and will be checked again after refresh; it was not resubmitted.');
     } catch (err: any) {
+      if (err instanceof RecoverableVideoTaskError) throw err;
       if (err instanceof TerminalVideoTaskError) throw err;
       if (err instanceof VideoStatusHttpError && err.retryable) {
         retryableStatusErrors++;

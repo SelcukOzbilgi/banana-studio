@@ -56,7 +56,7 @@ export function ProviderRoutingSettings() {
   const route = useProviderRoute('gpt-image-2.5-sunburst');
   return <section className="space-y-4 border-t border-white/10 pt-5" aria-labelledby="provider-routing-title">
     <div><h3 id="provider-routing-title" className="font-semibold">Provider routing</h3>
-      <p className="mt-2 text-xs leading-relaxed text-gray-400">Add only the keys you need. Auto uses the first configured provider shown for each model; Wiro comes first for images. A running request keeps its provider and is never resubmitted to a different service. These route preferences are saved on this device.</p></div>
+      <p className="mt-2 text-xs leading-relaxed text-gray-400">Add only the keys you need. Auto uses the first configured provider shown for each model; Wiro comes first for images and Seedance video. A running request keeps its provider and is never resubmitted to a different service. These route preferences are saved on this device.</p></div>
     <ul aria-label="Provider keys" className="flex flex-wrap gap-x-4 gap-y-1 text-xs">{(Object.keys(PROVIDER_KEYS) as AIProvider[]).filter(provider => isLocalWorkspace() || !LOCAL_ONLY_PROVIDERS.includes(provider)).map(provider => <li key={provider} className={route.available[provider] ? 'text-emerald-300' : 'text-gray-500'}>
       {PROVIDER_LABELS[provider]} · {route.available[provider] ? 'configured' : provider === 'wiro' ? 'key and secret missing' : provider === 'claude-cli' ? 'CLI bulunamadı' : 'key missing'}</li>)}</ul>
     {Object.keys(MODELS).map(model => <div key={model}><p className="mb-1.5 text-sm text-gray-200">{MODELS[model]}</p><ProviderRouteControl model={model} showError={false} /></div>)}

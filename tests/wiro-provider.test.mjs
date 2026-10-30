@@ -69,7 +69,9 @@ test('Wiro is first in Auto for the three image models, needs both key and secre
   assert.throws(()=>resolveProvider('wiro:black-forest-labs/flux-2-pro','openai',{wiro:true,openai:true}));
   assert.throws(()=>resolveProvider('wiro:black-forest-labs/flux-2-pro','auto',{openai:true}),/Wiro/);
   assert.throws(()=>resolveProvider('wiro:../etc','auto',{wiro:true}),/Unsupported/);
-  for(const model of ['seedance-2.5','minimax-h3','gpt-6.1-sol'])assert.ok(!MODEL_ROUTES[model].includes('wiro'),'video and text routes are unchanged');
+  // Fork: Seedance video now routes to Wiro first; H3 and text routes are unchanged.
+  for(const model of ['seedance-2.0','seedance-2.5'])assert.deepEqual(MODEL_ROUTES[model],['wiro','evolink','fal','openrouter']);
+  for(const model of ['minimax-h3','gpt-6.1-sol'])assert.ok(!MODEL_ROUTES[model].includes('wiro'),'H3 and text routes are unchanged');
   const saved={k:process.env.WIRO_API_KEY,s:process.env.WIRO_API_SECRET};
   try{
     process.env.WIRO_API_KEY=KEY;delete process.env.WIRO_API_SECRET;assert.equal(api.providerAvailability().wiro,false);
