@@ -18,6 +18,7 @@ import { getImageCostHistory } from './services/imageCostHistory';
 import type { ImageCostSample } from './lib/images/imageCostPreview';
 import { resumeGptImage2Task } from './services/falImageService';
 import { createVideoTask, pollVideoTask, logVideoUsage, RecoverableVideoTaskError, isRecoverableVideoTaskError } from './services/runwayService';
+import { loadFolderStyleLocks, setActiveStyleLockFolder } from './services/styleLockService';
 import { getSeedanceFrameError } from './lib/video/seedanceFrames';
 import { getSession, supabase } from './services/authService';
 import { H3_MAX_CAPABILITIES } from './lib/video/h3Max';
@@ -170,6 +171,9 @@ const AuthorizedWorkspace: React.FC<{
 
   // Navigation State
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  // Fork: the target folder's style lock follows the open folder.
+  useEffect(() => { setActiveStyleLockFolder(currentFolderId); }, [currentFolderId]);
+  useEffect(() => { if (isAuthenticated) loadFolderStyleLocks().catch(error => console.warn(error instanceof Error ? error.message : 'Folder style locks could not be loaded.')); }, [isAuthenticated]);
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
 

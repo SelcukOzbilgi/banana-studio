@@ -23,7 +23,7 @@ import { ImageEditArea } from './ImageEditArea';
 import { getOpenAIImageOptions, getOpenAIImageSize, getSunburstReferences, getImagePromptContextKey, SUNBURST_MODEL, validateOpenAIImageOptions, validateOpenAIImageSize } from '../lib/images/openaiImage';
 import React, { useRef, useState, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Sparkles, Pencil, X, Wand2, Plus, Minus, Loader2, ImagePlus, ChevronDown, ChevronUp, Check, Ratio, Scan, LayoutTemplate, Save, Trash2, RefreshCw, Eraser, Lightbulb, User, Users, Zap, Image as ImageIcon, Play, FileImage, FolderOpen, GripVertical, Video, Clock, Volume2, Music, Film, DollarSign, SkipForward, Rewind, FastForward, RotateCcw, AlertTriangle, Package } from 'lucide-react';
+import { Sparkles, Pencil, X, Wand2, Plus, Minus, Loader2, ImagePlus, ChevronDown, ChevronUp, Check, Ratio, Scan, LayoutTemplate, Save, Trash2, RefreshCw, Eraser, Lightbulb, User, Users, Zap, Image as ImageIcon, Play, FileImage, FolderOpen, GripVertical, Video, Clock, Volume2, Music, Film, DollarSign, SkipForward, Rewind, FastForward, RotateCcw, AlertTriangle, Package, Lock } from 'lucide-react';
 import { GenerationConfig, ReferenceImage, ReferenceVideo, ReferenceAudio, Template, BrainstormCategory, SavedReferenceImage, IMAGE_MODEL_OPTIONS, VIDEO_MODEL_OPTIONS, VIDEO_ASPECT_RATIO_OPTIONS, VIDEO_QUALITY_OPTIONS, VIDEO_DURATION_OPTIONS, DEFAULT_VIDEO_MODEL, GenerationMode, VideoModelId, VideoOperation, VideoPromptIntent, VideoAspectRatio, VideoQuality, VideoDuration, estimateVideoCost, getVideoPromptIntent, getPromptEnhancementTarget, isEnhancedPromptStale } from '../types';
 import { enhancePrompt, enhanceVideoPrompt } from '../services/geminiService';
 import { compressImage, estimateBase64Size, saveReferenceImage, getReferenceGallery, deleteReferenceImage, uploadVideoBlobToPublicUrl } from '../services/storageService';
@@ -35,6 +35,7 @@ import { createPromptPreparation } from '../lib/prompts/promptPreparation';
 import type { TextTaskStage } from '../services/geminiClient';
 import type { BrainstormGenerationRequest } from '../lib/brainstorm/brainstormGeneration';
 import { DEFAULT_PRODUCT_SHOT_MODE, PRODUCT_SHOT_MODES, isProductShotMode, type ProductShotMode } from '../lib/prompts/productShotModes';
+import { useActiveStyleLock } from '../services/styleLockService';
 import { getOriginalImagePrompt } from '../lib/prompts/promptHistory';
 import { updateImageDraftPrompt, validateImageGenerationReferences, getSunburstEditIntent } from '../lib/images/imagePrompting';
 import { isValidEditRegion } from '../lib/images/imageEditRegion';
@@ -470,6 +471,7 @@ export const Controls: React.FC<ControlsProps> = ({
 
   // Brainstorm config only; accepted batches belong to the gallery workflow.
   const [brainstormCategory, setBrainstormCategory] = useState<BrainstormCategory>('youtube_thumbnail');
+  const activeStyleLock = useActiveStyleLock();
   // Fork: Product mode is a UI preference (route names only), kept across sessions.
   const [productShotMode, setProductShotModeState] = useState<ProductShotMode>(() => {
     try { const saved = localStorage.getItem('banana-product-shot-mode'); return isProductShotMode(saved) ? saved : DEFAULT_PRODUCT_SHOT_MODE; } catch { return DEFAULT_PRODUCT_SHOT_MODE; }
@@ -2688,6 +2690,12 @@ export const Controls: React.FC<ControlsProps> = ({
 
                 {/* Brainstorm Button - Icon only with badge, hidden in video mode */}
                 {!isVideoMode && (<>
+                {activeStyleLock && (
+                  <span title={`Style lock: ${activeStyleLock.folderName || 'this folder'}. Enhance, Brainstorm and image prompts use this folder's style.`}
+                    className="flex h-[42px] max-w-[170px] shrink-0 items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/[0.07] px-2.5 text-[10px] font-semibold text-amber-200">
+                    <Lock className="h-3.5 w-3.5 shrink-0" /><span className="truncate">Style lock: {activeStyleLock.folderName || 'folder'}</span>
+                  </span>
+                )}
                 <button
                     ref={brainstormButtonRef}
                     onClick={handleToggleBrainstormPanel}

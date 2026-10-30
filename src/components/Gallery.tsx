@@ -6,7 +6,7 @@ import { getImageOutputRatio, getImageResolutionLabel, hasImageSizeMismatch, SUN
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import JSZip from 'jszip';
 import { isMobilePhotoDevice, preparePhotosForSharing, sharePreparedPhotos } from '../services/photoShareService';
-import { Link as ShareLink, Download, X, ZoomIn, ImagePlus, Grid3X3, Sparkles, Info, Copy, Check, Trash2, Image as ImageIcon, ChevronLeft, ChevronRight, ChevronDown, RotateCcw, RefreshCw, FolderPlus, Folder as FolderIcon, FolderOpen, ArrowLeft, MoreVertical, MousePointer2, Scan, Ratio, Layers, Pencil, Heart, MoreHorizontal, AlertCircle, Shuffle, Bell, CheckCircle, AlertTriangle, Loader2, Play, Pause, Video, Film, Clock, Volume2, VolumeX, CircleQuestionMark, ShieldCheck, Maximize2, Rewind, FastForward, Minus, Plus, Search, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { Link as ShareLink, Download, X, ZoomIn, ImagePlus, Grid3X3, Sparkles, Info, Copy, Check, Trash2, Image as ImageIcon, ChevronLeft, ChevronRight, ChevronDown, RotateCcw, RefreshCw, FolderPlus, Folder as FolderIcon, FolderOpen, ArrowLeft, MoreVertical, MousePointer2, Scan, Ratio, Layers, Pencil, Heart, MoreHorizontal, AlertCircle, Shuffle, Bell, CheckCircle, AlertTriangle, Loader2, Play, Pause, Video, Film, Clock, Volume2, VolumeX, CircleQuestionMark, ShieldCheck, Maximize2, Rewind, FastForward, Minus, Plus, Search, PanelRightClose, PanelRightOpen, Settings } from 'lucide-react';
 import { AdminUserSummary, GeneratedMedia, Folder, ReferenceImage, UserProfile, DEFAULT_IMAGE_MODEL, getImageModelLabel, IMAGE_COST_PER_GEN, estimateImageCost, type GenerationConfig, type TextModelId } from '../types';
 import { getImageById, saveFolder, getFolders, renameFolder, refreshMediaAccessUrl, type DeleteFolderResult } from '../services/storageService';
 import { ImageCompareDialog } from './ImageCompareDialog';
@@ -26,6 +26,8 @@ import { Toast } from './Toast';
 import { HelpCenter } from './HelpCenter';
 import { FolderPreview } from './FolderPreview';
 import { FolderShareDialog } from './FolderShareDialog';
+import { FolderStyleLockDialog } from './FolderStyleLockDialog';
+import { setStyleLockFolderNames, styleLocksSupported, useStyleLockState } from '../services/styleLockService';
 import { buildFolderPreviewIndex } from './folderPreviews';
 import { groupBrainstormImages } from './galleryOrdering';
 import { getGalleryAspectRatio, getGalleryCardStyle, getGallerySwipeDirection, isGalleryDismissSwipe, getNavigableGalleryMedia, type GallerySwipeStart } from './galleryPresentation';
@@ -735,6 +737,10 @@ export const Gallery: React.FC<GalleryProps> = ({
   // --- State ---
   const [folders, setFolders] = useState<Folder[]>([]);
   const [sharingFolder, setSharingFolder] = useState<Folder | null>(null);
+  // Fork: per-folder style lock settings (Mac workspace).
+  const [styleLockFolder, setStyleLockFolder] = useState<Folder | null>(null);
+  const styleLockState = useStyleLockState();
+  useEffect(() => { setStyleLockFolderNames(folders); }, [folders]);
   const [folderLoadError, setFolderLoadError] = useState<string | null>(null);
   const [isFoldersLoading, setIsFoldersLoading] = useState(true);
   const selectedMediaId = selectedImageId;
@@ -1926,6 +1932,7 @@ export const Gallery: React.FC<GalleryProps> = ({
 
       <HelpCenter open={isHelpCenterOpen} onClose={() => setIsHelpCenterOpen(false)} />
       {sharingFolder && !isReadOnly && <FolderShareDialog key={sharingFolder.id} folder={sharingFolder} onClose={() => setSharingFolder(null)} />}
+      {styleLockFolder && !isReadOnly && <FolderStyleLockDialog key={styleLockFolder.id} folder={styleLockFolder} onClose={() => setStyleLockFolder(null)} />}
 
       {isCreatingFolder && !isReadOnly && (
         <div
@@ -2148,6 +2155,11 @@ export const Gallery: React.FC<GalleryProps> = ({
                     onClick={() => setSharingFolder(currentFolder)} title="Share folder with URL" aria-label="Share folder with URL"
                     className="flex h-10 items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-[#161b22] px-3 text-xs font-semibold text-gray-300 hover:text-white">
                     <ShareLink className="h-4 w-4" /><span className="hidden xl:inline">Share</span>
+                  </button>}
+                  {styleLocksSupported() && !isReadOnly && currentFolder && !showFavoritesOnly && <button
+                    onClick={() => setStyleLockFolder(currentFolder)} title="Folder settings: style lock" aria-label={`Folder settings for ${currentFolder.name}`}
+                    className={`flex h-10 items-center justify-center gap-2 rounded-xl border px-3 text-xs font-semibold ${styleLockState.locks[currentFolder.id]?.enabled ? 'border-amber-400/40 bg-amber-500/10 text-amber-200' : 'border-white/[0.08] bg-[#161b22] text-gray-300 hover:text-white'}`}>
+                    <Settings className="h-4 w-4" /><span className="hidden xl:inline">Settings</span>
                   </button>}
                   <button
                     onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedIds(new Set()); }}
@@ -2641,6 +2653,8 @@ export const Gallery: React.FC<GalleryProps> = ({
                     {!isReadOnly && <div className="absolute right-2.5 top-2.5 z-20 flex gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
                       {!isLocalWorkspace() && <button onClick={event => { event.stopPropagation(); setSharingFolder(folder); }} title="Share folder with URL" aria-label={`Share ${folder.name} with URL`}
                         className="grid h-8 w-8 place-items-center rounded-lg border border-white/[0.08] bg-black/55 text-gray-400 backdrop-blur-sm hover:text-white"><ShareLink className="h-3.5 w-3.5" /></button>}
+                      {styleLocksSupported() && <button onClick={event => { event.stopPropagation(); setStyleLockFolder(folder); }} title="Folder settings: style lock" aria-label={`Folder settings for ${folder.name}`}
+                        className={`grid h-8 w-8 place-items-center rounded-lg border bg-black/55 backdrop-blur-sm transition-colors hover:text-white ${styleLockState.locks[folder.id]?.enabled ? 'border-amber-400/40 text-amber-300' : 'border-white/[0.08] text-gray-400'}`}><Settings className="h-3.5 w-3.5" /></button>}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -3155,6 +3169,10 @@ export const Gallery: React.FC<GalleryProps> = ({
                 <p className="mt-1 text-sm text-white">{PROVIDER_LABELS[selectedMedia.generationProvider]}</p>
                 {selectedMedia.providerModel && <p className="mt-1 break-all text-xs text-gray-500">{selectedMedia.providerModel}</p>}
                 {selectedMedia.providerTaskId && <p className="mt-1 break-all text-xs text-gray-500">{PROVIDER_LABELS[selectedMedia.generationProvider]} task {selectedMedia.providerTaskId}</p>}
+              </div>}
+              {selectedMedia.styleLockFolder && <div className="mb-4 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3">
+                <p className="text-[10px] font-bold uppercase text-amber-300/80">Style lock applied</p>
+                <p className="mt-1 break-words text-sm text-white">{selectedMedia.styleLockFolder}</p>
               </div>}
               {/* Metadata Grid */}
               {selectedMedia.mediaType === 'video' ? (

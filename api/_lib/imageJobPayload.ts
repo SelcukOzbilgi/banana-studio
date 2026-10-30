@@ -11,6 +11,7 @@ import { canonicalMediaUrl, signedMediaUrl } from './imageStorage.js';
 import { MediaAccessError } from '../../src/lib/references/mediaAccess.js';
 import { isWiroModelId, validateWiroOptions, type WiroControls } from '../../src/lib/wiro/catalog.js';
 import { loadWiroControls } from './wiro.js';
+import { activeStyleLock, styleLockRecord } from '../../src/lib/styleLock/styleLock.js';
 
 export class ImageJobInputError extends Error {}
 const invalid = (message: string): never => { throw new ImageJobInputError(message); };
@@ -81,17 +82,21 @@ export const prepareImageJobPayload = async (body: any, callerDb: any) => {
     }
     return path;
   }));
+  const styleLock = activeStyleLock(body.styleLock);
   const payload = { id: body.id, model: body.model as string, provider, prompt: body.prompt,
     displayPrompt: typeof body.displayPrompt === 'string' && body.displayPrompt.length <= 32000 ? body.displayPrompt : body.prompt,
     originalPrompt: body.originalPrompt, aspectRatio: body.aspectRatio, resolution: body.resolution,
     options, referenceImages: refs, privateReferencePaths, folderId: body.folderId || null,
     ...(wiroControls ? { wiroOptions: Object.fromEntries((['ratio','resolution','quality'] as const).filter(key => typeof body.wiroOptions?.[key] === 'string').map(key => [key, body.wiroOptions[key]])) } : {}),
-    imagePromptCategory: body.imagePromptCategory, promptPreparation: normalizePromptPreparation(body.promptPreparation), youtubeSource: normalizeYouTubeSource(body.youtubeSource) };
+    imagePromptCategory: body.imagePromptCategory, promptPreparation: normalizePromptPreparation(body.promptPreparation), youtubeSource: normalizeYouTubeSource(body.youtubeSource),
+    // Fork: bounded snapshot of the target folder's style lock; recomposed with the prompt on every attempt.
+    ...(styleLock ? { styleLock } : {}) };
   const prepared = prepareSunburstGeneration(payload.prompt, refs, { ...payload, imageModel: body.model, openaiImageOptions: options });
   if (prepared.prompt.length > 32000) invalid('Shorten the prompt to leave room for reference instructions.');
   const metadata = { generationProvider: provider, providerModel: payload.model, originalPrompt: payload.originalPrompt, youtubeSource: payload.youtubeSource, promptPreparation: payload.promptPreparation,
     openaiImageOptions: payload.model === SUNBURST_MODEL ? options : undefined, imagePromptCategory: payload.imagePromptCategory,
     imageGenerationPrompt: prepared.prompt, imageGenerationReferenceIds: prepared.referenceImages.map(ref=>ref.id),
+    ...(styleLockRecord(prepared.prompt, styleLock) ? { styleLock: styleLockRecord(prepared.prompt, styleLock) } : {}),
     imageRequestedSize: payload.model === SUNBURST_MODEL ? getOpenAIImageSize({ ...payload, openaiImageOptions: options }) : wiroControls ? 'Model settings' : `${payload.resolution} · ${payload.aspectRatio}` };
   return { payload, metadata };
 };
